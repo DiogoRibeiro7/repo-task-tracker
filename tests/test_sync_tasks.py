@@ -886,8 +886,9 @@ class TestValidateConfig:
         assert any("Dependency cycle detected" in e for e in errors)
 
     def test_non_string_labels(self):
+        bad_labels: Any = ["ok", 123]
         cfg = TrackerConfig(
-            tasks=[make_task(title="A", labels=["ok", 123])],  # type: ignore[list-item]
+            tasks=[make_task(title="A", labels=bad_labels)],
             project_owner="",
             project_number=0,
         )

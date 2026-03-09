@@ -354,7 +354,9 @@ def _rest(
                 body = resp.read().decode("utf-8")
                 return json.loads(body) if body else None
         except HTTPError as exc:
-            retry_after_raw = (exc.headers or {}).get("retry-after")
+            retry_after_raw: Optional[str] = None
+            if exc.headers is not None:
+                retry_after_raw = exc.headers.get("retry-after")
             if exc.code == 403 and retry_after_raw is not None and retries_left > 0:
                 retries_left -= 1
                 try:

@@ -19,7 +19,7 @@ spec = importlib.util.spec_from_file_location("sync_tasks", MODULE_PATH)
 assert spec and spec.loader
 sync_tasks = importlib.util.module_from_spec(spec)
 sys.modules["sync_tasks"] = sync_tasks
-spec.loader.exec_module(sync_tasks)  # type: ignore[union-attr]
+spec.loader.exec_module(sync_tasks)
 
 
 # ---------------------------------------------------------------------------
