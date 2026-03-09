@@ -1,0 +1,38 @@
+name: Smoke Test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    name: Action smoke test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Create sample tracker
+        run: |
+          cat > tracker-smoke.json << 'EOF'
+          {
+            "tasks": [
+              {
+                "title": "Smoke task",
+                "status": "planned",
+                "priority": "medium",
+                "labels": ["smoke"]
+              }
+            ]
+          }
+          EOF
+
+      - name: Run local action (validate-only)
+        uses: ./
+        with:
+          github-token: ${{ github.token }}
+          tracker-path: tracker-smoke.json
+          validate: 'true'
