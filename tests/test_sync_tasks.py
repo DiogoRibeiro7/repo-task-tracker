@@ -780,3 +780,64 @@ class TestValidateOnlyMode:
         err = capsys.readouterr().err
         assert "Validation failed:" in err
         assert "1." in err
+
+
+class TestDryRunMode:
+    def test_create_issue_dry_run_skips_rest(self, monkeypatch, capsys):
+        monkeypatch.setenv("DRY_RUN", "true")
+        monkeypatch.setattr(st, "_rest", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no REST writes")))
+        issue = st.create_issue(make_task(title="Dry create", labels=["x"]))
+        out = capsys.readouterr().out
+        assert "[DRY RUN]" in out
+        assert issue["number"] == 0
+
+    def test_update_issue_dry_run_skips_rest(self, monkeypatch, capsys):
+        monkeypatch.setenv("DRY_RUN", "true")
+        monkeypatch.setattr(st, "_rest", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no REST writes")))
+        st.update_issue(123, make_task(title="Dry update"), state="closed")
+        out = capsys.readouterr().out
+        assert "[DRY RUN]" in out
+
+    def test_sync_closed_task_dry_run_no_mutating_calls(self, monkeypatch, tmp_path, capsys):
+        tracker = tmp_path / "tracker.json"
+        tracker.write_text(json.dumps({
+            "tasks": [{"title": "Done task", "status": "done"}]
+        }), encoding="utf-8")
+
+        monkeypatch.setenv("GITHUB_TOKEN", "token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setenv("DRY_RUN", "true")
+        monkeypatch.setattr(st, "TRACKER_PATH", tracker)
+        monkeypatch.setattr(st, "ensure_label", lambda: None)
+        monkeypatch.setattr(st, "list_issues", lambda: [])
+        monkeypatch.setattr(st, "_rest", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no REST writes")))
+
+        st.sync()
+        out = capsys.readouterr().out
+        assert "[DRY RUN]" in out
+
+    def test_sync_to_project_dry_run_skips_project_writes(self, monkeypatch, capsys):
+        monkeypatch.setenv("DRY_RUN", "true")
+        monkeypatch.setattr(st, "add_to_project", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no project writes")))
+        monkeypatch.setattr(st, "_set_single_select", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no project writes")))
+        monkeypatch.setattr(st, "_set_text", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no project writes")))
+        monkeypatch.setattr(st, "REPOSITORY", "owner/repo")
+
+        st.sync_to_project(
+            make_issue(node_id="ISS1"),
+            make_task(title="Dry project", status="planned", priority="high"),
+            "P1",
+            {},
+            {
+                "Status": {"id": "F1"},
+                "Priority": {"id": "F2"},
+                "Repo URL": {"id": "F3"},
+                "Next action": {"id": "F4"},
+            },
+            {
+                "Status:Planned": "S1",
+                "Priority:High": "P1",
+            },
+        )
+        out = capsys.readouterr().out
+        assert "[DRY RUN]" in out

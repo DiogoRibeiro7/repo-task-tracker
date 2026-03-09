@@ -187,6 +187,10 @@ def _is_truthy(value: str) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _is_dry_run() -> bool:
+    return _is_truthy(os.environ.get("DRY_RUN", "false"))
+
+
 def _find_cycles(tasks: List[Task]) -> List[List[str]]:
     graph: Dict[str, List[str]] = {task.title: list(task.depends_on) for task in tasks}
     visited: Set[str] = set()
@@ -374,6 +378,18 @@ def find_issue(
 
 def create_issue(task: Task) -> Dict[str, Any]:
     issue_labels = [MANAGED_LABEL] + task.labels
+    if _is_dry_run():
+        print(
+            f"[DRY RUN] Would create issue for task '{task.title}' "
+            f"with labels {issue_labels}."
+        )
+        return {
+            "number": 0,
+            "title": task.issue_title,
+            "state": "open",
+            "body": task.to_issue_body(),
+            "id": f"DRYRUN_{task.slug}",
+        }
     result = _rest("POST", f"/repos/{REPOSITORY}/issues", {
         "title": task.issue_title,
         "body": task.to_issue_body(),
@@ -392,6 +408,15 @@ def update_issue(
     }
     if state:
         payload["state"] = state
+    if _is_dry_run():
+        if state:
+            print(
+                f"[DRY RUN] Would update issue #{number} "
+                f"for task '{task.title}' and set state='{state}'."
+            )
+        else:
+            print(f"[DRY RUN] Would update issue #{number} for task '{task.title}'.")
+        return
     _rest("PATCH", f"/repos/{REPOSITORY}/issues/{number}", payload)
     tag = f"→ {state}" if state else "updated"
     print(f"  ↻ Updated  #{number} ({tag}): {task.title}")
@@ -528,14 +553,39 @@ def sync_to_project(
     options: Dict[str, str],
 ) -> None:
     issue_id = issue["id"]
+    status_opt = options.get(f"Status:{task.project_status}")
+    priority_opt = options.get(f"Priority:{task.project_priority}")
+
+    if _is_dry_run():
+        item_id = project_items.get(issue_id)
+        if item_id is None:
+            print(f"[DRY RUN] Would add issue '{task.title}' to project board.")
+            item_id = f"DRYRUN_ITEM_{task.slug}"
+            project_items[issue_id] = item_id
+
+        if status_opt and "Status" in fields:
+            print(
+                f"[DRY RUN] Would set project Status for '{task.title}' "
+                f"to '{task.project_status}'."
+            )
+        if priority_opt and "Priority" in fields:
+            print(
+                f"[DRY RUN] Would set project Priority for '{task.title}' "
+                f"to '{task.project_priority}'."
+            )
+        if "Repo URL" in fields:
+            print(f"[DRY RUN] Would set project Repo URL to '{REPOSITORY}'.")
+        if "Next action" in fields:
+            print(
+                f"[DRY RUN] Would set project Next action for '{task.title}'."
+            )
+        return
+
     item_id = project_items.get(issue_id)
     if item_id is None:
         item_id = add_to_project(project_id, issue_id)
         project_items[issue_id] = item_id          # keep local cache current
         print("    ↗ Added to project board")
-
-    status_opt = options.get(f"Status:{task.project_status}")
-    priority_opt = options.get(f"Priority:{task.project_priority}")
 
     if status_opt and "Status" in fields:
         _set_single_select(project_id, item_id, fields["Status"]["id"], status_opt)
@@ -617,10 +667,16 @@ def sync() -> None:
         elif status in CLOSED_STATUSES:
             if existing is None:
                 existing = create_issue(task)
-                _rest("PATCH",
-                      f"/repos/{REPOSITORY}/issues/{existing['number']}",
-                      {"state": "closed"})
-                print("    ✕ Closed immediately")
+                if _is_dry_run():
+                    print(
+                        f"[DRY RUN] Would immediately close issue "
+                        f"for task '{task.title}'."
+                    )
+                else:
+                    _rest("PATCH",
+                          f"/repos/{REPOSITORY}/issues/{existing['number']}",
+                          {"state": "closed"})
+                    print("    ✕ Closed immediately")
             elif existing.get("state") == "open":
                 update_issue(int(existing["number"]), task, state="closed")
 
@@ -640,11 +696,18 @@ def sync() -> None:
 if __name__ == "__main__":  # pragma: no cover
     parser = argparse.ArgumentParser(description="Sync tracker.json to GitHub.")
     parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print planned writes without creating/updating issues or project items.",
+    )
+    parser.add_argument(
         "--validate",
         action="store_true",
         help="Validate tracker.json and exit without making API calls.",
     )
     args = parser.parse_args()
+    if args.dry_run:
+        os.environ["DRY_RUN"] = "true"
     if args.validate:
         os.environ["VALIDATE_ONLY"] = "true"
     sync()

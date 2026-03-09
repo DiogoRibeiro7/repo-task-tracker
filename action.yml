@@ -42,6 +42,12 @@ inputs:
     required: false
     default: 'false'
 
+  dry-run:
+    description: >
+      Preview changes without mutating issues or project board items.
+    required: false
+    default: 'false'
+
 runs:
   using: composite
   steps:
@@ -59,4 +65,5 @@ runs:
         PROJECT_NUMBER: ${{ inputs.project-number }}
         TRACKER_PATH: ${{ inputs.tracker-path }}
         VALIDATE_ONLY: ${{ inputs.validate }}
+        DRY_RUN: ${{ inputs.dry-run }}
       run: python "${{ github.action_path }}/sync_tasks.py"
