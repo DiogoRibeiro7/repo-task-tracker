@@ -87,6 +87,8 @@ class Task:
     priority: str
     labels: List[str] = field(default_factory=list)
     depends_on: List[str] = field(default_factory=list)
+    assignees: List[str] = field(default_factory=list)
+    milestone: Optional[int] = None
 
     @property
     def issue_title(self) -> str:
@@ -126,8 +128,12 @@ class Task:
             f"| **Status** | `{self.status}` |",
             f"| **Priority** | `{self.priority}` |",
             f"| **Tracker key** | `{self.slug}` |",
-            "",
         ]
+        if self.assignees:
+            lines.append(f"| **Assignees** | `{', '.join(self.assignees)}` |")
+        if self.milestone is not None:
+            lines.append(f"| **Milestone** | `{self.milestone}` |")
+        lines.append("")
         if self.description:
             lines += ["## Description", "", self.description, ""]
         return "\n".join(lines).strip() + "\n"
@@ -164,6 +170,16 @@ def load_config(path: Path) -> TrackerConfig:
                 f" Known values: {sorted(known)}",
                 file=sys.stderr,
             )
+        milestone_raw = item.get("milestone")
+        milestone: Optional[int]
+        if milestone_raw is None or milestone_raw == "":
+            milestone = None
+        else:
+            try:
+                milestone = int(milestone_raw)
+            except (TypeError, ValueError):
+                milestone = None
+
         tasks.append(Task(
             title=title,
             description=str(item.get("description", "")).strip(),
@@ -171,6 +187,8 @@ def load_config(path: Path) -> TrackerConfig:
             priority=str(item.get("priority", "medium")).strip().lower(),
             labels=list(item.get("labels", [])),
             depends_on=list(item.get("depends_on", [])),
+            assignees=list(item.get("assignees", [])),
+            milestone=milestone,
         ))
 
     owner = str(raw.get("project_owner", PROJECT_OWNER)).strip()
@@ -378,6 +396,16 @@ def find_issue(
 
 def create_issue(task: Task) -> Dict[str, Any]:
     issue_labels = [MANAGED_LABEL] + task.labels
+    payload: Dict[str, Any] = {
+        "title": task.issue_title,
+        "body": task.to_issue_body(),
+        "labels": issue_labels,
+    }
+    if task.assignees:
+        payload["assignees"] = task.assignees
+    if task.milestone is not None:
+        payload["milestone"] = task.milestone
+
     if _is_dry_run():
         print(
             f"[DRY RUN] Would create issue for task '{task.title}' "
@@ -390,11 +418,7 @@ def create_issue(task: Task) -> Dict[str, Any]:
             "body": task.to_issue_body(),
             "id": f"DRYRUN_{task.slug}",
         }
-    result = _rest("POST", f"/repos/{REPOSITORY}/issues", {
-        "title": task.issue_title,
-        "body": task.to_issue_body(),
-        "labels": issue_labels,
-    })
+    result = _rest("POST", f"/repos/{REPOSITORY}/issues", payload)
     print(f"  ✚ Created  #{result['number']}: {task.title}")
     return result
 
@@ -406,6 +430,10 @@ def update_issue(
         "title": task.issue_title,
         "body": task.to_issue_body(),
     }
+    if task.assignees:
+        payload["assignees"] = task.assignees
+    if task.milestone is not None:
+        payload["milestone"] = task.milestone
     if state:
         payload["state"] = state
     if _is_dry_run():

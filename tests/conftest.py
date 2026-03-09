@@ -43,6 +43,8 @@ def make_task(
     priority: str = "medium",
     labels: Optional[List[str]] = None,
     depends_on: Optional[List[str]] = None,
+    assignees: Optional[List[str]] = None,
+    milestone: Optional[int] = None,
 ) -> Any:
     return sync_tasks.Task(
         title=title,
@@ -51,6 +53,8 @@ def make_task(
         priority=priority,
         labels=labels or [],
         depends_on=depends_on or [],
+        assignees=assignees or [],
+        milestone=milestone,
     )
 
 

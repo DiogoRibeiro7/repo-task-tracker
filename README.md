@@ -144,6 +144,8 @@ token is sufficient.
 | `status` | string | `planned` | See status values below. |
 | `priority` | string | `medium` | `low`, `medium`, `high`, `critical` |
 | `labels` | array | `[]` | Extra labels to add to the issue alongside `tracker`. |
+| `assignees` | array | `[]` | GitHub login names to assign on issue create/update. |
+| `milestone` | integer | `null` | Milestone number to set on issue create/update. |
 
 ### Status values
 

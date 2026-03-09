@@ -107,6 +107,12 @@ class TestTaskToIssueBody:
         t = make_task()
         assert "repo-task-tracker" in t.to_issue_body()
 
+    def test_includes_assignees_and_milestone_when_set(self):
+        t = make_task(assignees=["alice", "bob"], milestone=3)
+        body = t.to_issue_body()
+        assert "`alice, bob`" in body
+        assert "`3`" in body
+
 
 # ===========================================================================
 # load_config
@@ -196,6 +202,18 @@ class TestLoadConfig:
         assert config.tasks[0].status == "whatever"
         captured = capsys.readouterr()
         assert "WARNING" in captured.err
+
+    def test_assignees_and_milestone_loaded(self, tmp_path):
+        p = self._write(tmp_path, {
+            "tasks": [{
+                "title": "X",
+                "assignees": ["alice", "bob"],
+                "milestone": 4,
+            }]
+        })
+        config = st.load_config(p)
+        assert config.tasks[0].assignees == ["alice", "bob"]
+        assert config.tasks[0].milestone == 4
 
 
 # ===========================================================================
@@ -500,12 +518,47 @@ class TestRestHelpers:
         assert calls[0][0] == "POST"
         assert calls[0][2]["labels"] == ["tracker", "bug"]
 
+    def test_create_issue_includes_assignees_and_milestone(self, monkeypatch):
+        calls = []
+
+        def fake_rest(method, path, payload=None, expected_errors=None):
+            calls.append((method, path, payload, expected_errors))
+            return {"number": 33}
+
+        monkeypatch.setattr(st, "_rest", fake_rest)
+        task = make_task(title="Feature", assignees=["alice"], milestone=2)
+        st.create_issue(task)
+        payload = calls[0][2]
+        assert payload["assignees"] == ["alice"]
+        assert payload["milestone"] == 2
+
+    def test_create_issue_missing_assignees_and_milestone_is_safe(self, monkeypatch):
+        calls = []
+
+        def fake_rest(method, path, payload=None, expected_errors=None):
+            calls.append((method, path, payload, expected_errors))
+            return {"number": 34}
+
+        monkeypatch.setattr(st, "_rest", fake_rest)
+        st.create_issue(make_task(title="No extras"))
+        payload = calls[0][2]
+        assert "assignees" not in payload
+        assert "milestone" not in payload
+
     def test_update_issue_sets_state_when_provided(self, monkeypatch):
         calls = []
         monkeypatch.setattr(st, "_rest", lambda *a, **k: calls.append((a, k)))
         st.update_issue(3, make_task(title="X"), state="closed")
         payload = calls[0][0][2]
         assert payload["state"] == "closed"
+
+    def test_update_issue_includes_assignees_and_milestone(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(st, "_rest", lambda *a, **k: calls.append((a, k)))
+        st.update_issue(7, make_task(title="X", assignees=["alice"], milestone=8))
+        payload = calls[0][0][2]
+        assert payload["assignees"] == ["alice"]
+        assert payload["milestone"] == 8
 
 
 class TestGraphQLHelpers:
