@@ -2,10 +2,10 @@
 from __future__ import annotations
 
 import json
-import os
+from io import BytesIO
 from pathlib import Path
-from typing import Any, Dict, List
-from unittest.mock import MagicMock, patch
+from typing import Any, List
+from urllib.error import HTTPError
 
 import pytest
 
@@ -400,3 +400,285 @@ class TestSync:
         monkeypatch.setattr(st, "TRACKER_PATH", tmp_path / "nope.json")
         with pytest.raises(SystemExit):
             st.sync()
+
+
+class TestRestHelpers:
+    def test_load_config_invalid_project_number_defaults_to_zero(self, tmp_path):
+        p = tmp_path / "tracker.json"
+        p.write_text(json.dumps({"project_number": "oops", "tasks": []}), encoding="utf-8")
+        config = st.load_config(p)
+        assert config.project_number == 0
+
+    def test_rest_fails_without_token(self, monkeypatch):
+        monkeypatch.setattr(st, "TOKEN", "")
+        monkeypatch.setattr(st, "REPOSITORY", "owner/repo")
+        with pytest.raises(SystemExit):
+            st._rest("GET", "/repos/owner/repo/issues")
+
+    def test_rest_fails_without_repository(self, monkeypatch):
+        monkeypatch.setattr(st, "TOKEN", "token")
+        monkeypatch.setattr(st, "REPOSITORY", "")
+        with pytest.raises(SystemExit):
+            st._rest("GET", "/repos/owner/repo/issues")
+
+    def test_rest_success_and_empty_body(self, monkeypatch):
+        monkeypatch.setattr(st, "TOKEN", "token")
+        monkeypatch.setattr(st, "REPOSITORY", "owner/repo")
+
+        class Resp:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return None
+
+            def read(self):
+                return self.payload
+
+        payloads = [b'{"ok": true}', b""]
+
+        def fake_urlopen(_req):
+            return Resp(payloads.pop(0))
+
+        monkeypatch.setattr(st, "urlopen", fake_urlopen)
+        assert st._rest("GET", "/x") == {"ok": True}
+        assert st._rest("GET", "/x") is None
+
+    def test_rest_expected_http_error_parses_json(self, monkeypatch):
+        monkeypatch.setattr(st, "TOKEN", "token")
+        monkeypatch.setattr(st, "REPOSITORY", "owner/repo")
+
+        def fake_urlopen(_req):
+            raise HTTPError(
+                url="https://api.github.com/x",
+                code=422,
+                msg="unprocessable",
+                hdrs=None,
+                fp=BytesIO(b'{"errors":[{"code":"already_exists"}]}'),
+            )
+
+        monkeypatch.setattr(st, "urlopen", fake_urlopen)
+        result = st._rest("POST", "/x", expected_errors={422})
+        assert result["__error__"]["status"] == 422
+        assert result["__error__"]["body"]["errors"][0]["code"] == "already_exists"
+
+    def test_rest_expected_http_error_non_json_body(self, monkeypatch):
+        monkeypatch.setattr(st, "TOKEN", "token")
+        monkeypatch.setattr(st, "REPOSITORY", "owner/repo")
+
+        def fake_urlopen(_req):
+            raise HTTPError(
+                url="https://api.github.com/x",
+                code=404,
+                msg="not found",
+                hdrs=None,
+                fp=BytesIO(b"plain error body"),
+            )
+
+        monkeypatch.setattr(st, "urlopen", fake_urlopen)
+        result = st._rest("GET", "/x", expected_errors={404})
+        assert result["__error__"]["body"]["message"] == "plain error body"
+
+    def test_list_issues_returns_empty_when_rest_none(self, monkeypatch):
+        monkeypatch.setattr(st, "_rest", lambda *a, **k: None)
+        assert st.list_issues() == []
+
+    def test_create_issue_calls_rest_with_labels(self, monkeypatch):
+        calls = []
+
+        def fake_rest(method, path, payload=None, expected_errors=None):
+            calls.append((method, path, payload, expected_errors))
+            return {"number": 12}
+
+        monkeypatch.setattr(st, "_rest", fake_rest)
+        task = make_task(title="Feature", labels=["bug"])
+        issue = st.create_issue(task)
+        assert issue["number"] == 12
+        assert calls[0][0] == "POST"
+        assert calls[0][2]["labels"] == ["tracker", "bug"]
+
+    def test_update_issue_sets_state_when_provided(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(st, "_rest", lambda *a, **k: calls.append((a, k)))
+        st.update_issue(3, make_task(title="X"), state="closed")
+        payload = calls[0][0][2]
+        assert payload["state"] == "closed"
+
+
+class TestGraphQLHelpers:
+    def test_graphql_returns_data(self, monkeypatch):
+        class Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return None
+
+            def read(self):
+                return b'{"data":{"ok":1}}'
+
+        monkeypatch.setattr(st.urllib.request, "urlopen", lambda _req: Resp())
+        assert st._graphql("query {}", {}) == {"ok": 1}
+
+    def test_graphql_raises_when_only_errors(self, monkeypatch):
+        class Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return None
+
+            def read(self):
+                return b'{"errors":[{"message":"boom"}]}'
+
+        monkeypatch.setattr(st.urllib.request, "urlopen", lambda _req: Resp())
+        with pytest.raises(RuntimeError):
+            st._graphql("query {}", {})
+
+    def test_get_project_meta_prefers_user_project(self, monkeypatch):
+        monkeypatch.setattr(st, "_graphql", lambda *_: {
+            "user": {"projectV2": {
+                "id": "P1",
+                "fields": {"nodes": [
+                    {"id": "F1", "name": "Status", "options": [{"id": "O1", "name": "Planned"}]},
+                    {"id": "F2", "name": "Priority", "options": []},
+                    {"id": "F3"},
+                ]}
+            }},
+            "organization": {"projectV2": None},
+        })
+        pid, fields, options = st.get_project_meta("owner", 1)
+        assert pid == "P1"
+        assert "Status" in fields
+        assert options["Status:Planned"] == "O1"
+
+    def test_get_project_meta_falls_back_to_org(self, monkeypatch):
+        monkeypatch.setattr(st, "_graphql", lambda *_: {
+            "user": {"projectV2": None},
+            "organization": {"projectV2": {"id": "P2", "fields": {"nodes": []}}},
+        })
+        pid, fields, options = st.get_project_meta("org", 1)
+        assert pid == "P2"
+        assert fields == {}
+        assert options == {}
+
+    def test_get_project_meta_raises_when_missing(self, monkeypatch):
+        monkeypatch.setattr(st, "_graphql", lambda *_: {
+            "user": {"projectV2": None},
+            "organization": {"projectV2": None},
+        })
+        with pytest.raises(RuntimeError):
+            st.get_project_meta("owner", 123)
+
+    def test_get_project_items_maps_issue_ids(self, monkeypatch):
+        monkeypatch.setattr(st, "_graphql", lambda *_: {
+            "node": {"items": {"nodes": [
+                {"id": "ITEM1", "content": {"id": "ISS1"}},
+                {"id": "ITEM2", "content": None},
+                {"id": "ITEM3", "content": {"id": "ISS2"}},
+            ]}}
+        })
+        assert st.get_project_items("P1") == {"ISS1": "ITEM1", "ISS2": "ITEM3"}
+
+    def test_add_to_project_returns_item_id(self, monkeypatch):
+        monkeypatch.setattr(st, "_graphql", lambda *_: {"addProjectV2ItemById": {"item": {"id": "ITEM9"}}})
+        assert st.add_to_project("P1", "ISS1") == "ITEM9"
+
+    def test_set_single_select_and_text_call_graphql(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(st, "_graphql", lambda q, v: calls.append((q, v)) or {})
+        st._set_single_select("P1", "I1", "F1", "O1")
+        st._set_text("P1", "I1", "F2", "hello")
+        assert calls[0][1]["oid"] == "O1"
+        assert calls[1][1]["v"] == "hello"
+
+
+class TestProjectSync:
+    def test_sync_to_project_adds_item_and_sets_all_fields(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(st, "add_to_project", lambda pid, iid: "ITEM_NEW")
+        monkeypatch.setattr(st, "_set_single_select", lambda *a: calls.append(("select", a)))
+        monkeypatch.setattr(st, "_set_text", lambda *a: calls.append(("text", a)))
+        monkeypatch.setattr(st, "REPOSITORY", "owner/repo")
+
+        issue = make_issue(node_id="ISS100")
+        task = make_task(description="next step", status="planned", priority="high")
+        items = {}
+        fields = {
+            "Status": {"id": "F_STATUS"},
+            "Priority": {"id": "F_PRIORITY"},
+            "Repo URL": {"id": "F_URL"},
+            "Next action": {"id": "F_NEXT"},
+        }
+        options = {
+            "Status:Planned": "O_PLAN",
+            "Priority:High": "O_HIGH",
+        }
+        st.sync_to_project(issue, task, "P1", items, fields, options)
+        assert items["ISS100"] == "ITEM_NEW"
+        assert len(calls) == 4
+
+    def test_sync_to_project_reuses_existing_item_and_skips_missing_fields(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(st, "_set_single_select", lambda *a: calls.append(("select", a)))
+        monkeypatch.setattr(st, "_set_text", lambda *a: calls.append(("text", a)))
+        monkeypatch.setattr(st, "REPOSITORY", "owner/repo")
+
+        issue = make_issue(node_id="ISS100")
+        task = make_task(status="done", priority="critical")
+        st.sync_to_project(
+            issue,
+            task,
+            "P1",
+            {"ISS100": "ITEM1"},
+            {"Status": {"id": "F_STATUS"}},
+            {"Status:Done": "O_DONE"},
+        )
+        assert len(calls) == 1
+        assert calls[0][0] == "select"
+
+
+class TestSyncProjectMode:
+    def test_sync_with_project_calls_project_sync(self, monkeypatch, tmp_path):
+        tracker = tmp_path / "tracker.json"
+        tracker.write_text(json.dumps({
+            "project_owner": "owner",
+            "project_number": 1,
+            "tasks": [{"title": "Task P", "status": "planned"}],
+        }), encoding="utf-8")
+
+        monkeypatch.setenv("GITHUB_TOKEN", "token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setattr(st, "TRACKER_PATH", tracker)
+        monkeypatch.setattr(st, "ensure_label", lambda: None)
+        monkeypatch.setattr(st, "list_issues", lambda: [])
+        monkeypatch.setattr(st, "create_issue", lambda _t: make_issue(node_id="ISS1"))
+        monkeypatch.setattr(st, "get_project_meta", lambda *_: ("P1", {"Status": {"id": "F1"}}, {"Status:Planned": "O1"}))
+        monkeypatch.setattr(st, "get_project_items", lambda _pid: {})
+        calls = []
+        monkeypatch.setattr(st, "sync_to_project", lambda *a, **k: calls.append(a))
+
+        st.sync()
+        assert len(calls) == 1
+
+    def test_sync_project_failure_continues_without_project(self, monkeypatch, tmp_path):
+        tracker = tmp_path / "tracker.json"
+        tracker.write_text(json.dumps({
+            "project_owner": "owner",
+            "project_number": 1,
+            "tasks": [{"title": "Task P", "status": "planned"}],
+        }), encoding="utf-8")
+
+        monkeypatch.setenv("GITHUB_TOKEN", "token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setattr(st, "TRACKER_PATH", tracker)
+        monkeypatch.setattr(st, "ensure_label", lambda: None)
+        monkeypatch.setattr(st, "list_issues", lambda: [])
+        monkeypatch.setattr(st, "create_issue", lambda _t: make_issue(node_id="ISS1"))
+        monkeypatch.setattr(st, "get_project_meta", lambda *_: (_ for _ in ()).throw(RuntimeError("boom")))
+        monkeypatch.setattr(st, "sync_to_project", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not be called")))
+
+        st.sync()
