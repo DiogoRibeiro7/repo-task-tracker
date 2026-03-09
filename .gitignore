@@ -32,4 +32,8 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
+# Local planning / helper docs
 ROADMAP.md
+RELEASE_TAGGING_STEPS.md
+*.local.md
+*.scratch.md
