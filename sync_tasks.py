@@ -270,7 +270,7 @@ def detect_cycles(tasks: List[Task]) -> None:
         _fail(f"Circular dependencies detected: {cycle_text}")
 
 
-def validate_config(config: TrackerConfig) -> List[str]:
+def validate_config(config: TrackerConfig, source: str = "tracker.json") -> List[str]:
     errors: List[str] = []
     known_statuses = OPEN_STATUSES | CLOSED_STATUSES
     known_priorities = set(PRIORITY_MAP.keys())
@@ -279,37 +279,48 @@ def validate_config(config: TrackerConfig) -> List[str]:
 
     for task in config.tasks:
         if task.title in seen_titles:
-            errors.append(f"Duplicate task title: '{task.title}'.")
+            errors.append(f"[{source}] Duplicate task title: '{task.title}'.")
         seen_titles.add(task.title)
 
         status = task.normalized_status
         if status not in known_statuses:
             errors.append(
-                f"Task '{task.title}' has invalid status '{task.status}'. "
+                f"[{source}] Task '{task.title}' has invalid status '{task.status}'. "
                 f"Known values: {sorted(known_statuses)}."
             )
 
         priority = task.priority.strip().lower()
         if priority not in known_priorities:
             errors.append(
-                f"Task '{task.title}' has invalid priority '{task.priority}'. "
+                f"[{source}] Task '{task.title}' has invalid priority '{task.priority}'. "
                 f"Known values: {sorted(known_priorities)}."
             )
 
         for dep in task.depends_on:
+            if not isinstance(dep, str):
+                errors.append(
+                    f"[{source}] Task '{task.title}' has a non-string dependency: {dep!r}."
+                )
+                continue
             if dep not in known_titles:
                 errors.append(
-                    f"Task '{task.title}' depends on unknown task '{dep}'."
+                    f"[{source}] Task '{task.title}' depends on unknown task '{dep}'."
                 )
 
         for label in task.labels:
             if not isinstance(label, str):
                 errors.append(
-                    f"Task '{task.title}' has a non-string label: {label!r}."
+                    f"[{source}] Task '{task.title}' has a non-string label: {label!r}."
+                )
+
+        for assignee in task.assignees:
+            if not isinstance(assignee, str):
+                errors.append(
+                    f"[{source}] Task '{task.title}' has a non-string assignee: {assignee!r}."
                 )
 
     for cycle in _find_cycles(config.tasks):
-        errors.append(f"Dependency cycle detected: {' -> '.join(cycle)}.")
+        errors.append(f"[{source}] Dependency cycle detected: {' -> '.join(cycle)}.")
 
     return errors
 
@@ -804,7 +815,7 @@ def sync_one(path: Path) -> None:
     validate_only = _is_truthy(os.environ.get("VALIDATE_ONLY", "false"))
 
     if validate_only:
-        errors = validate_config(config)
+        errors = validate_config(config, source=str(path))
         if errors:
             print("Validation failed:", file=sys.stderr)
             for i, msg in enumerate(errors, start=1):

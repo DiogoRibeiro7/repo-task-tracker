@@ -895,6 +895,25 @@ class TestValidateConfig:
         errors = st.validate_config(cfg)
         assert any("non-string label" in e for e in errors)
 
+    def test_non_string_assignees(self):
+        bad_assignees: Any = ["alice", 123]
+        cfg = TrackerConfig(
+            tasks=[make_task(title="A", assignees=bad_assignees)],
+            project_owner="",
+            project_number=0,
+        )
+        errors = st.validate_config(cfg)
+        assert any("non-string assignee" in e for e in errors)
+
+    def test_validation_errors_include_source(self):
+        cfg = TrackerConfig(
+            tasks=[make_task(title="A", status="bad_status")],
+            project_owner="",
+            project_number=0,
+        )
+        errors = st.validate_config(cfg, source="configs/a.json")
+        assert any(e.startswith("[configs/a.json]") for e in errors)
+
 
 class TestValidateOnlyMode:
     def test_validate_only_success_exits_without_api_calls(self, monkeypatch, tmp_path, capsys):
