@@ -23,6 +23,7 @@ TRACKER_PATH        Path to tracker.json (default: tracker.json).
 """
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
@@ -85,6 +86,7 @@ class Task:
     status: str
     priority: str
     labels: List[str] = field(default_factory=list)
+    depends_on: List[str] = field(default_factory=list)
 
     @property
     def issue_title(self) -> str:
@@ -168,6 +170,7 @@ def load_config(path: Path) -> TrackerConfig:
             status=status,
             priority=str(item.get("priority", "medium")).strip().lower(),
             labels=list(item.get("labels", [])),
+            depends_on=list(item.get("depends_on", [])),
         ))
 
     owner = str(raw.get("project_owner", PROJECT_OWNER)).strip()
@@ -178,6 +181,84 @@ def load_config(path: Path) -> TrackerConfig:
         number = 0
 
     return TrackerConfig(tasks=tasks, project_owner=owner, project_number=number)
+
+
+def _is_truthy(value: str) -> bool:
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _find_cycles(tasks: List[Task]) -> List[List[str]]:
+    graph: Dict[str, List[str]] = {task.title: list(task.depends_on) for task in tasks}
+    visited: Set[str] = set()
+    active: Set[str] = set()
+    path: List[str] = []
+    cycles: List[List[str]] = []
+
+    def dfs(node: str) -> None:
+        if node in active:
+            if node in path:
+                idx = path.index(node)
+                cycles.append(path[idx:] + [node])
+            return
+        if node in visited:
+            return
+
+        visited.add(node)
+        active.add(node)
+        path.append(node)
+        for dep in graph.get(node, []):
+            if dep in graph:
+                dfs(dep)
+        path.pop()
+        active.remove(node)
+
+    for node in graph:
+        dfs(node)
+    return cycles
+
+
+def validate_config(config: TrackerConfig) -> List[str]:
+    errors: List[str] = []
+    known_statuses = OPEN_STATUSES | CLOSED_STATUSES
+    known_priorities = set(PRIORITY_MAP.keys())
+    seen_titles: Set[str] = set()
+    known_titles = {task.title for task in config.tasks}
+
+    for task in config.tasks:
+        if task.title in seen_titles:
+            errors.append(f"Duplicate task title: '{task.title}'.")
+        seen_titles.add(task.title)
+
+        status = task.normalized_status
+        if status not in known_statuses:
+            errors.append(
+                f"Task '{task.title}' has invalid status '{task.status}'. "
+                f"Known values: {sorted(known_statuses)}."
+            )
+
+        priority = task.priority.strip().lower()
+        if priority not in known_priorities:
+            errors.append(
+                f"Task '{task.title}' has invalid priority '{task.priority}'. "
+                f"Known values: {sorted(known_priorities)}."
+            )
+
+        for dep in task.depends_on:
+            if dep not in known_titles:
+                errors.append(
+                    f"Task '{task.title}' depends on unknown task '{dep}'."
+                )
+
+        for label in task.labels:
+            if not isinstance(label, str):
+                errors.append(
+                    f"Task '{task.title}' has a non-string label: {label!r}."
+                )
+
+    for cycle in _find_cycles(config.tasks):
+        errors.append(f"Dependency cycle detected: {' -> '.join(cycle)}.")
+
+    return errors
 
 
 # ---------------------------------------------------------------------------
@@ -471,17 +552,28 @@ def sync_to_project(
 # ---------------------------------------------------------------------------
 
 def sync() -> None:
+    if not TRACKER_PATH.exists():
+        _fail(f"tracker.json not found at '{TRACKER_PATH}'.")
+
+    config = load_config(TRACKER_PATH)
+    validate_only = _is_truthy(os.environ.get("VALIDATE_ONLY", "false"))
+
+    if validate_only:
+        errors = validate_config(config)
+        if errors:
+            print("Validation failed:", file=sys.stderr)
+            for i, msg in enumerate(errors, start=1):
+                print(f"{i}. {msg}", file=sys.stderr)
+            raise SystemExit(1)
+        print("Validation passed.")
+        return
+
     missing_env = [
         v for v in ("GITHUB_TOKEN", "GITHUB_REPOSITORY")
         if not os.environ.get(v)
     ]
     if missing_env:
         _fail(f"Missing required environment variables: {', '.join(missing_env)}")
-
-    if not TRACKER_PATH.exists():
-        _fail(f"tracker.json not found at '{TRACKER_PATH}'.")
-
-    config = load_config(TRACKER_PATH)
 
     use_project = bool(config.project_owner and config.project_number)
     project_id = fields = options = project_items = None
@@ -546,4 +638,13 @@ def sync() -> None:
 
 
 if __name__ == "__main__":  # pragma: no cover
+    parser = argparse.ArgumentParser(description="Sync tracker.json to GitHub.")
+    parser.add_argument(
+        "--validate",
+        action="store_true",
+        help="Validate tracker.json and exit without making API calls.",
+    )
+    args = parser.parse_args()
+    if args.validate:
+        os.environ["VALIDATE_ONLY"] = "true"
     sync()

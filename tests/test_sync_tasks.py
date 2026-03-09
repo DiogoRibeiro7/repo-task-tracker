@@ -682,3 +682,101 @@ class TestSyncProjectMode:
         monkeypatch.setattr(st, "sync_to_project", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not be called")))
 
         st.sync()
+
+
+class TestValidateConfig:
+    def test_duplicate_titles(self):
+        cfg = TrackerConfig(
+            tasks=[
+                make_task(title="A"),
+                make_task(title="A"),
+            ],
+            project_owner="",
+            project_number=0,
+        )
+        errors = st.validate_config(cfg)
+        assert any("Duplicate task title" in e for e in errors)
+
+    def test_invalid_status(self):
+        cfg = TrackerConfig(
+            tasks=[make_task(title="A", status="unknown_status")],
+            project_owner="",
+            project_number=0,
+        )
+        errors = st.validate_config(cfg)
+        assert any("invalid status" in e for e in errors)
+
+    def test_invalid_priority(self):
+        cfg = TrackerConfig(
+            tasks=[make_task(title="A", priority="urgent")],
+            project_owner="",
+            project_number=0,
+        )
+        errors = st.validate_config(cfg)
+        assert any("invalid priority" in e for e in errors)
+
+    def test_unknown_depends_on(self):
+        cfg = TrackerConfig(
+            tasks=[make_task(title="A", depends_on=["Missing"])],
+            project_owner="",
+            project_number=0,
+        )
+        errors = st.validate_config(cfg)
+        assert any("depends on unknown task" in e for e in errors)
+
+    def test_dependency_cycle(self):
+        cfg = TrackerConfig(
+            tasks=[
+                make_task(title="A", depends_on=["B"]),
+                make_task(title="B", depends_on=["A"]),
+            ],
+            project_owner="",
+            project_number=0,
+        )
+        errors = st.validate_config(cfg)
+        assert any("Dependency cycle detected" in e for e in errors)
+
+    def test_non_string_labels(self):
+        cfg = TrackerConfig(
+            tasks=[make_task(title="A", labels=["ok", 123])],  # type: ignore[list-item]
+            project_owner="",
+            project_number=0,
+        )
+        errors = st.validate_config(cfg)
+        assert any("non-string label" in e for e in errors)
+
+
+class TestValidateOnlyMode:
+    def test_validate_only_success_exits_without_api_calls(self, monkeypatch, tmp_path, capsys):
+        tracker = tmp_path / "tracker.json"
+        tracker.write_text(json.dumps({
+            "tasks": [{"title": "Valid task", "status": "planned", "priority": "medium"}]
+        }), encoding="utf-8")
+
+        monkeypatch.setenv("VALIDATE_ONLY", "true")
+        monkeypatch.setattr(st, "TRACKER_PATH", tracker)
+        monkeypatch.setattr(st, "ensure_label", lambda: (_ for _ in ()).throw(AssertionError("no API calls")))
+        monkeypatch.setattr(st, "list_issues", lambda: (_ for _ in ()).throw(AssertionError("no API calls")))
+
+        st.sync()
+        out = capsys.readouterr().out
+        assert "Validation passed." in out
+
+    def test_validate_only_failure_prints_numbered_errors(self, monkeypatch, tmp_path, capsys):
+        tracker = tmp_path / "tracker.json"
+        tracker.write_text(json.dumps({
+            "tasks": [
+                {"title": "Dup", "status": "planned", "priority": "medium"},
+                {"title": "Dup", "status": "bad", "priority": "urgent", "labels": [1]},
+            ]
+        }), encoding="utf-8")
+
+        monkeypatch.setenv("VALIDATE_ONLY", "true")
+        monkeypatch.setattr(st, "TRACKER_PATH", tracker)
+        monkeypatch.setattr(st, "ensure_label", lambda: (_ for _ in ()).throw(AssertionError("no API calls")))
+
+        with pytest.raises(SystemExit):
+            st.sync()
+        err = capsys.readouterr().err
+        assert "Validation failed:" in err
+        assert "1." in err

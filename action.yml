@@ -36,6 +36,12 @@ inputs:
     required: false
     default: 'tracker.json'
 
+  validate:
+    description: >
+      Validate tracker.json only and exit without creating/updating issues.
+    required: false
+    default: 'false'
+
 runs:
   using: composite
   steps:
@@ -52,4 +58,5 @@ runs:
         PROJECT_OWNER: ${{ inputs.project-owner }}
         PROJECT_NUMBER: ${{ inputs.project-number }}
         TRACKER_PATH: ${{ inputs.tracker-path }}
+        VALIDATE_ONLY: ${{ inputs.validate }}
       run: python "${{ github.action_path }}/sync_tasks.py"

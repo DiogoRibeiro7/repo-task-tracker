@@ -42,6 +42,7 @@ def make_task(
     status: str = "planned",
     priority: str = "medium",
     labels: Optional[List[str]] = None,
+    depends_on: Optional[List[str]] = None,
 ) -> Any:
     return sync_tasks.Task(
         title=title,
@@ -49,6 +50,7 @@ def make_task(
         status=status,
         priority=priority,
         labels=labels or [],
+        depends_on=depends_on or [],
     )
 
 
