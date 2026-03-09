@@ -1,7 +1,5 @@
 name: 'Repo Task Tracker'
-description: >
-  Syncs a tracker.json task list to GitHub Issues in the current repo,
-  then pushes those issues to a central GitHub Projects (v2) board.
+description: 'Sync tracker.json tasks to GitHub Issues and optionally to a central GitHub Project (v2) board.'
 
 author: 'Diogo Ribeiro <dfr@esmad.ipp.pt>'
 
