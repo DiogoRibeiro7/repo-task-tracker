@@ -3,8 +3,8 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      version:
-        description: 'Semver without leading v (example: 1.0.4)'
+      tag:
+        description: 'Existing signed tag to release (example: v1.0.4)'
         required: true
         type: string
 
@@ -12,42 +12,38 @@ permissions:
   contents: write
 
 jobs:
-  tag-and-release:
-    name: Tag and Release
+  publish-release:
+    name: Publish Release From Signed Tag
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
-      - name: Configure git user
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-
-      - name: Create version tag and move v1
+      - name: Verify signed tag exists
         env:
-          VERSION: ${{ inputs.version }}
+          TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
           git fetch --tags
-          TAG="v${VERSION}"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists"
+          git rev-parse "$TAG" >/dev/null
+          TYPE="$(git cat-file -t "refs/tags/$TAG" || true)"
+          if [ "$TYPE" != "tag" ]; then
+            echo "Tag $TAG must be an annotated tag."
             exit 1
           fi
-          git tag -a "$TAG" -m "Release $TAG"
-          git push origin "$TAG"
-          git tag -fa v1 -m "Update v1 to $TAG" "$TAG"
-          git push origin v1 --force
+          TAG_BODY="$(git cat-file -p "refs/tags/$TAG")"
+          if ! echo "$TAG_BODY" | grep -Eq "BEGIN (PGP|SSH) SIGNATURE"; then
+            echo "Tag $TAG is not signed. See RELEASE_POLICY.md."
+            exit 1
+          fi
 
       - name: Create GitHub release
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          VERSION: ${{ inputs.version }}
+          TAG: ${{ inputs.tag }}
         run: |
           set -euo pipefail
-          TAG="v${VERSION}"
           gh release create "$TAG" \
             --title "Repo Task Tracker $TAG" \
             --generate-notes

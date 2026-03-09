@@ -1,0 +1,34 @@
+name: Tag Signature Policy
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: read
+
+jobs:
+  verify-tag-signature:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Enforce signed annotated release tags
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          git fetch --tags
+          TYPE="$(git cat-file -t "refs/tags/$TAG" || true)"
+          if [ "$TYPE" != "tag" ]; then
+            echo "Tag $TAG must be an annotated tag."
+            exit 1
+          fi
+          TAG_BODY="$(git cat-file -p "refs/tags/$TAG")"
+          if ! echo "$TAG_BODY" | grep -Eq "BEGIN (PGP|SSH) SIGNATURE"; then
+            echo "Tag $TAG must be signed. See RELEASE_POLICY.md."
+            exit 1
+          fi

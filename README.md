@@ -244,3 +244,4 @@ pytest
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Release process and signed tag requirements are documented in [RELEASE_POLICY.md](RELEASE_POLICY.md).
