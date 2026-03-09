@@ -748,11 +748,18 @@ def write_step_summary(path: Path, rows: List[Dict[str, str]]) -> None:
 # Main sync loop
 # ---------------------------------------------------------------------------
 
-def sync() -> None:
-    if not TRACKER_PATH.exists():
-        _fail(f"tracker.json not found at '{TRACKER_PATH}'.")
+def _resolve_tracker_paths() -> List[Path]:
+    tracker_glob = os.environ.get("TRACKER_GLOB", "").strip()
+    if tracker_glob:
+        return sorted(Path(".").glob(tracker_glob))
+    return [TRACKER_PATH]
 
-    config = load_config(TRACKER_PATH)
+
+def sync_one(path: Path) -> None:
+    if not path.exists():
+        _fail(f"tracker.json not found at '{path}'.")
+
+    config = load_config(path)
     validate_only = _is_truthy(os.environ.get("VALIDATE_ONLY", "false"))
 
     if validate_only:
@@ -907,6 +914,31 @@ def sync() -> None:
         write_step_summary(Path(summary_path), summary_rows)
 
     print("\nDone.")
+
+
+def sync() -> None:
+    paths = _resolve_tracker_paths()
+    if not paths:
+        _fail("No tracker files found for TRACKER_GLOB pattern.")
+
+    failed = False
+    for path in paths:
+        print(f"\n=== Processing tracker file: {path} ===")
+        try:
+            sync_one(path)
+        except SystemExit as exc:
+            failed = True
+            code = exc.code if isinstance(exc.code, int) else 1
+            print(
+                f"ERROR: failed to process '{path}' (exit code {code}).",
+                file=sys.stderr,
+            )
+        except Exception as exc:
+            failed = True
+            print(f"ERROR: failed to process '{path}': {exc}", file=sys.stderr)
+
+    if failed:
+        raise SystemExit(1)
 
 
 if __name__ == "__main__":  # pragma: no cover

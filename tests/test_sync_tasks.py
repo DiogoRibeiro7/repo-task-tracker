@@ -1015,3 +1015,69 @@ class TestStepSummary:
         assert "| Action | Count |" in text
         assert "| created | 1 |" in text
         assert "| #42 | [tracker] Task A | created |" in text
+
+
+class TestMultiFileSync:
+    def test_tracker_glob_processes_multiple_files(self, monkeypatch, tmp_path):
+        (tmp_path / "a.json").write_text(
+            json.dumps({"tasks": [{"title": "Task A", "status": "planned"}]}),
+            encoding="utf-8",
+        )
+        (tmp_path / "b.json").write_text(
+            json.dumps({"tasks": [{"title": "Task B", "status": "planned"}]}),
+            encoding="utf-8",
+        )
+
+        created = []
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("TRACKER_GLOB", "*.json")
+        monkeypatch.setenv("GITHUB_TOKEN", "token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setenv("ON_ORPHAN", "ignore")
+        monkeypatch.setattr(st, "ensure_label", lambda: None)
+        monkeypatch.setattr(st, "list_issues", lambda: [])
+        monkeypatch.setattr(st, "create_issue", lambda t, *a, **k: created.append(t.title) or make_issue(title=t.issue_title))
+
+        st.sync()
+        assert set(created) == {"Task A", "Task B"}
+
+    def test_tracker_glob_continues_when_one_file_is_bad(self, monkeypatch, tmp_path):
+        (tmp_path / "good.json").write_text(
+            json.dumps({"tasks": [{"title": "Good task", "status": "planned"}]}),
+            encoding="utf-8",
+        )
+        (tmp_path / "bad.json").write_text("{ invalid json", encoding="utf-8")
+
+        created = []
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("TRACKER_GLOB", "*.json")
+        monkeypatch.setenv("GITHUB_TOKEN", "token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setenv("ON_ORPHAN", "ignore")
+        monkeypatch.setattr(st, "ensure_label", lambda: None)
+        monkeypatch.setattr(st, "list_issues", lambda: [])
+        monkeypatch.setattr(st, "create_issue", lambda t, *a, **k: created.append(t.title) or make_issue(title=t.issue_title))
+
+        with pytest.raises(SystemExit):
+            st.sync()
+        assert "Good task" in created
+
+    def test_single_file_mode_still_works(self, monkeypatch, tmp_path):
+        tracker = tmp_path / "single.json"
+        tracker.write_text(
+            json.dumps({"tasks": [{"title": "Single task", "status": "planned"}]}),
+            encoding="utf-8",
+        )
+
+        created = []
+        monkeypatch.delenv("TRACKER_GLOB", raising=False)
+        monkeypatch.setenv("GITHUB_TOKEN", "token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setenv("ON_ORPHAN", "ignore")
+        monkeypatch.setattr(st, "TRACKER_PATH", tracker)
+        monkeypatch.setattr(st, "ensure_label", lambda: None)
+        monkeypatch.setattr(st, "list_issues", lambda: [])
+        monkeypatch.setattr(st, "create_issue", lambda t, *a, **k: created.append(t.title) or make_issue(title=t.issue_title))
+
+        st.sync()
+        assert created == ["Single task"]
