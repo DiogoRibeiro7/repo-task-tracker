@@ -651,6 +651,35 @@ def handle_orphans(
         print(f"  ✕ Closed orphan #{number}: {title}")
 
 
+def write_step_summary(path: Path, rows: List[Dict[str, str]]) -> None:
+    counts = {"created": 0, "updated": 0, "reopened": 0, "closed": 0}
+    for row in rows:
+        action = row["action"]
+        if action in counts:
+            counts[action] += 1
+
+    lines = [
+        "## repo-task-tracker summary",
+        "",
+        "| Action | Count |",
+        "|---|---:|",
+        f"| created | {counts['created']} |",
+        f"| updated | {counts['updated']} |",
+        f"| reopened | {counts['reopened']} |",
+        f"| closed | {counts['closed']} |",
+        "",
+        "| Issue | Title | Result |",
+        "|---:|---|---|",
+    ]
+    for row in rows:
+        lines.append(f"| #{row['number']} | {row['title']} | {row['action']} |")
+    lines.append("")
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as handle:
+        handle.write("\n".join(lines))
+
+
 # ---------------------------------------------------------------------------
 # Main sync loop
 # ---------------------------------------------------------------------------
@@ -703,6 +732,7 @@ def sync() -> None:
     ensure_label()
     existing_issues = list_issues()
     print(f"Syncing {len(config.tasks)} tasks → {REPOSITORY}\n")
+    summary_rows: List[Dict[str, str]] = []
 
     for task in config.tasks:
         existing = find_issue(existing_issues, task)
@@ -711,16 +741,36 @@ def sync() -> None:
         if status in OPEN_STATUSES:
             if existing is None:
                 existing = create_issue(task)
+                summary_rows.append({
+                    "number": str(existing.get("number", "?")),
+                    "title": str(existing.get("title", task.issue_title)),
+                    "action": "created",
+                })
             else:
                 num = int(existing["number"])
                 if existing.get("state") == "closed":
                     update_issue(num, task, state="open")
+                    summary_rows.append({
+                        "number": str(existing.get("number", num)),
+                        "title": str(existing.get("title", task.issue_title)),
+                        "action": "reopened",
+                    })
                 else:
                     update_issue(num, task)
+                    summary_rows.append({
+                        "number": str(existing.get("number", num)),
+                        "title": str(existing.get("title", task.issue_title)),
+                        "action": "updated",
+                    })
 
         elif status in CLOSED_STATUSES:
             if existing is None:
                 existing = create_issue(task)
+                summary_rows.append({
+                    "number": str(existing.get("number", "?")),
+                    "title": str(existing.get("title", task.issue_title)),
+                    "action": "created",
+                })
                 if _is_dry_run():
                     print(
                         f"[DRY RUN] Would immediately close issue "
@@ -731,8 +781,18 @@ def sync() -> None:
                           f"/repos/{REPOSITORY}/issues/{existing['number']}",
                           {"state": "closed"})
                     print("    ✕ Closed immediately")
+                summary_rows.append({
+                    "number": str(existing.get("number", "?")),
+                    "title": str(existing.get("title", task.issue_title)),
+                    "action": "closed",
+                })
             elif existing.get("state") == "open":
                 update_issue(int(existing["number"]), task, state="closed")
+                summary_rows.append({
+                    "number": str(existing.get("number", "?")),
+                    "title": str(existing.get("title", task.issue_title)),
+                    "action": "closed",
+                })
 
         else:
             print(f"  ⚠ Skipping unknown status '{task.status}': {task.title}")
@@ -749,6 +809,10 @@ def sync() -> None:
         config.tasks,
         os.environ.get("ON_ORPHAN", "warn"),
     )
+
+    summary_path = os.environ.get("GITHUB_STEP_SUMMARY", "").strip()
+    if summary_path:
+        write_step_summary(Path(summary_path), summary_rows)
 
     print("\nDone.")
 

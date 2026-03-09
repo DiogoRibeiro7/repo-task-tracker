@@ -871,3 +871,58 @@ class TestOrphanHandling:
         )
         out = capsys.readouterr().out
         assert "[DRY RUN]" in out
+
+
+class TestStepSummary:
+    def test_write_step_summary_format(self, tmp_path):
+        summary = tmp_path / "step_summary.md"
+        st.write_step_summary(summary, [
+            {"number": "1", "title": "[tracker] Task A", "action": "created"},
+            {"number": "1", "title": "[tracker] Task A", "action": "closed"},
+            {"number": "2", "title": "[tracker] Task B", "action": "updated"},
+        ])
+        text = summary.read_text(encoding="utf-8")
+        assert "| Action | Count |" in text
+        assert "| created | 1 |" in text
+        assert "| updated | 1 |" in text
+        assert "| reopened | 0 |" in text
+        assert "| closed | 1 |" in text
+        assert "| Issue | Title | Result |" in text
+        assert "| #1 | [tracker] Task A | created |" in text
+
+    def test_sync_without_step_summary_env_no_crash(self, monkeypatch, tmp_path):
+        tracker = tmp_path / "tracker.json"
+        tracker.write_text(json.dumps({
+            "tasks": [{"title": "Task A", "status": "planned"}]
+        }), encoding="utf-8")
+
+        monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+        monkeypatch.setenv("GITHUB_TOKEN", "token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setattr(st, "TRACKER_PATH", tracker)
+        monkeypatch.setattr(st, "ensure_label", lambda: None)
+        monkeypatch.setattr(st, "list_issues", lambda: [])
+        monkeypatch.setattr(st, "create_issue", lambda _t: make_issue(number=21, title="[tracker] Task A"))
+
+        st.sync()
+
+    def test_sync_writes_step_summary_when_env_set(self, monkeypatch, tmp_path):
+        tracker = tmp_path / "tracker.json"
+        tracker.write_text(json.dumps({
+            "tasks": [{"title": "Task A", "status": "planned"}]
+        }), encoding="utf-8")
+        summary = tmp_path / "summary.md"
+
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+        monkeypatch.setenv("GITHUB_TOKEN", "token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setattr(st, "TRACKER_PATH", tracker)
+        monkeypatch.setattr(st, "ensure_label", lambda: None)
+        monkeypatch.setattr(st, "list_issues", lambda: [])
+        monkeypatch.setattr(st, "create_issue", lambda _t: make_issue(number=42, title="[tracker] Task A"))
+
+        st.sync()
+        text = summary.read_text(encoding="utf-8")
+        assert "| Action | Count |" in text
+        assert "| created | 1 |" in text
+        assert "| #42 | [tracker] Task A | created |" in text
