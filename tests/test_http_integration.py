@@ -17,7 +17,7 @@ FIXTURES = Path(__file__).parent / "fixtures"
 class _Resp:
     def __init__(self, payload: bytes):
         self._payload = payload
-        self.headers = {}
+        self.headers: dict[str, str] = {}
 
     def __enter__(self):
         return self
