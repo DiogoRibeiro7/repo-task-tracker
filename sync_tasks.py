@@ -28,6 +28,7 @@ import json
 import os
 import re
 import sys
+import time
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -345,19 +346,57 @@ def _rest(
         headers["Content-Type"] = "application/json"
 
     req = Request(url=url, data=data, headers=headers, method=method)
+    retries_left = 1
+    while True:
+        try:
+            with urlopen(req) as resp:
+                _check_rate_limit(resp.headers)
+                body = resp.read().decode("utf-8")
+                return json.loads(body) if body else None
+        except HTTPError as exc:
+            retry_after_raw = (exc.headers or {}).get("retry-after")
+            if exc.code == 403 and retry_after_raw is not None and retries_left > 0:
+                retries_left -= 1
+                try:
+                    retry_seconds = float(retry_after_raw)
+                except (TypeError, ValueError):
+                    retry_seconds = 1.0
+                time.sleep(max(0.0, retry_seconds))
+                continue
+
+            body = exc.read().decode("utf-8", errors="replace")
+            if expected_errors and exc.code in expected_errors:
+                try:
+                    parsed: Any = json.loads(body) if body else {}
+                except json.JSONDecodeError:
+                    parsed = {"message": body}
+                return {"__error__": {"status": exc.code, "body": parsed}}
+            _fail(f"GitHub REST {method} {path} → {exc.code}\n{body}")
+
+
+def _check_rate_limit(headers: Any) -> None:
+    remaining_raw = headers.get("x-ratelimit-remaining")
+    reset_raw = headers.get("x-ratelimit-reset")
+    if remaining_raw is None or reset_raw is None:
+        return
+
     try:
-        with urlopen(req) as resp:
-            body = resp.read().decode("utf-8")
-            return json.loads(body) if body else None
-    except HTTPError as exc:
-        body = exc.read().decode("utf-8", errors="replace")
-        if expected_errors and exc.code in expected_errors:
-            try:
-                parsed: Any = json.loads(body) if body else {}
-            except json.JSONDecodeError:
-                parsed = {"message": body}
-            return {"__error__": {"status": exc.code, "body": parsed}}
-        _fail(f"GitHub REST {method} {path} → {exc.code}\n{body}")
+        remaining = int(remaining_raw)
+        reset_ts = int(reset_raw)
+    except (TypeError, ValueError):
+        return
+
+    try:
+        buffer = int(os.environ.get("RATELIMIT_BUFFER", "10"))
+    except (TypeError, ValueError):
+        buffer = 10
+
+    if remaining > buffer:
+        return
+
+    wait_seconds = (reset_ts + 1) - time.time()
+    if wait_seconds > 0:
+        time.sleep(wait_seconds)
 
 
 # ---------------------------------------------------------------------------

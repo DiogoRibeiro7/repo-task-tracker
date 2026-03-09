@@ -482,6 +482,7 @@ class TestRestHelpers:
         class Resp:
             def __init__(self, payload):
                 self.payload = payload
+                self.headers = {}
 
             def __enter__(self):
                 return self
@@ -595,6 +596,65 @@ class TestRestHelpers:
         payload = calls[0][0][2]
         assert payload["assignees"] == ["alice"]
         assert payload["milestone"] == 8
+
+    def test_check_rate_limit_sleeps_at_threshold(self, monkeypatch):
+        sleeps = []
+        monkeypatch.setenv("RATELIMIT_BUFFER", "10")
+        monkeypatch.setattr(st.time, "time", lambda: 100.0)
+        monkeypatch.setattr(st.time, "sleep", lambda seconds: sleeps.append(seconds))
+        st._check_rate_limit({
+            "x-ratelimit-remaining": "10",
+            "x-ratelimit-reset": "105",
+        })
+        assert sleeps == [6.0]
+
+    def test_check_rate_limit_no_sleep_above_threshold(self, monkeypatch):
+        sleeps = []
+        monkeypatch.setenv("RATELIMIT_BUFFER", "10")
+        monkeypatch.setattr(st.time, "time", lambda: 100.0)
+        monkeypatch.setattr(st.time, "sleep", lambda seconds: sleeps.append(seconds))
+        st._check_rate_limit({
+            "x-ratelimit-remaining": "11",
+            "x-ratelimit-reset": "105",
+        })
+        assert sleeps == []
+
+    def test_rest_retries_once_on_403_retry_after(self, monkeypatch):
+        monkeypatch.setattr(st, "TOKEN", "token")
+        monkeypatch.setattr(st, "REPOSITORY", "owner/repo")
+        sleeps = []
+        monkeypatch.setattr(st.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+        class Resp:
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return None
+
+            def read(self):
+                return b'{"ok": true}'
+
+        calls = {"n": 0}
+
+        def fake_urlopen(_req):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise HTTPError(
+                    url="https://api.github.com/x",
+                    code=403,
+                    msg="secondary rate limit",
+                    hdrs={"retry-after": "2"},
+                    fp=BytesIO(b'{"message":"rate limited"}'),
+                )
+            return Resp()
+
+        monkeypatch.setattr(st, "urlopen", fake_urlopen)
+        result = st._rest("GET", "/x")
+        assert result == {"ok": True}
+        assert sleeps == [2.0]
 
 
 class TestGraphQLHelpers:
