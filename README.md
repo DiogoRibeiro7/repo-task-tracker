@@ -1,6 +1,7 @@
 # repo-task-tracker
 
 [![CI](https://github.com/DiogoRibeiro7/repo-task-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/DiogoRibeiro7/repo-task-tracker/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/DiogoRibeiro7/repo-task-tracker/graph/badge.svg?branch=develop)](https://codecov.io/gh/DiogoRibeiro7/repo-task-tracker)
 
 A GitHub Action that turns a `tracker.json` file in your repository into
 GitHub Issues, then syncs those issues to a central GitHub Projects (v2) board.

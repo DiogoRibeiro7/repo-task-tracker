@@ -118,8 +118,8 @@ class Task:
             " [repo-task-tracker](https://github.com/DiogoRibeiro7/repo-task-tracker)"
             " action. Edit `tracker.json` to change it.",
             "",
-            f"| Field | Value |",
-            f"|---|---|",
+            "| Field | Value |",
+            "|---|---|",
             f"| **Task** | {self.title} |",
             f"| **Status** | `{self.status}` |",
             f"| **Priority** | `{self.priority}` |",
@@ -451,7 +451,7 @@ def sync_to_project(
     if item_id is None:
         item_id = add_to_project(project_id, issue_id)
         project_items[issue_id] = item_id          # keep local cache current
-        print(f"    ↗ Added to project board")
+        print("    ↗ Added to project board")
 
     status_opt = options.get(f"Status:{task.project_status}")
     priority_opt = options.get(f"Priority:{task.project_priority}")
@@ -528,7 +528,7 @@ def sync() -> None:
                 _rest("PATCH",
                       f"/repos/{REPOSITORY}/issues/{existing['number']}",
                       {"state": "closed"})
-                print(f"    ✕ Closed immediately")
+                print("    ✕ Closed immediately")
             elif existing.get("state") == "open":
                 update_issue(int(existing["number"]), task, state="closed")
 
@@ -545,5 +545,5 @@ def sync() -> None:
     print("\nDone.")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     sync()
