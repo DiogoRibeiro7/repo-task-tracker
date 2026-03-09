@@ -113,6 +113,13 @@ class TestTaskToIssueBody:
         assert "`alice, bob`" in body
         assert "`3`" in body
 
+    def test_dependencies_section_with_issue_numbers(self):
+        t = make_task(title="Task A", depends_on=["Task B", "Task C"])
+        body = t.to_issue_body({"Task B": 12})
+        assert "## Dependencies" in body
+        assert "- [ ] #12 Task B" in body
+        assert "- [ ] Task C" in body
+
 
 # ===========================================================================
 # load_config
@@ -215,6 +222,35 @@ class TestLoadConfig:
         assert config.tasks[0].assignees == ["alice", "bob"]
         assert config.tasks[0].milestone == 4
 
+    def test_unknown_dependency_warns(self, tmp_path, capsys):
+        p = self._write(tmp_path, {
+            "tasks": [{"title": "A", "depends_on": ["Missing"]}]
+        })
+        st.load_config(p)
+        err = capsys.readouterr().err
+        assert "depends on unknown task 'Missing'" in err
+
+    def test_cycle_detection_direct(self, tmp_path):
+        p = self._write(tmp_path, {
+            "tasks": [
+                {"title": "A", "depends_on": ["B"]},
+                {"title": "B", "depends_on": ["A"]},
+            ]
+        })
+        with pytest.raises(SystemExit):
+            st.load_config(p)
+
+    def test_cycle_detection_transitive(self, tmp_path):
+        p = self._write(tmp_path, {
+            "tasks": [
+                {"title": "A", "depends_on": ["B"]},
+                {"title": "B", "depends_on": ["C"]},
+                {"title": "C", "depends_on": ["A"]},
+            ]
+        })
+        with pytest.raises(SystemExit):
+            st.load_config(p)
+
 
 # ===========================================================================
 # find_issue
@@ -306,10 +342,10 @@ class TestSync:
         monkeypatch.setattr(st, "list_issues",
                             lambda: existing_issues or [])
         monkeypatch.setattr(st, "create_issue",
-                            lambda t: actions.append(("create", t.title))
+                            lambda t, *args, **kwargs: actions.append(("create", t.title))
                             or make_issue(title=t.issue_title))
         monkeypatch.setattr(st, "update_issue",
-                            lambda n, t, state=None:
+                            lambda n, t, state=None, **kwargs:
                             actions.append(("update", n, t.title, state)))
         monkeypatch.setattr(st, "_rest", lambda *a, **kw: None)
 
@@ -708,7 +744,7 @@ class TestSyncProjectMode:
         monkeypatch.setattr(st, "TRACKER_PATH", tracker)
         monkeypatch.setattr(st, "ensure_label", lambda: None)
         monkeypatch.setattr(st, "list_issues", lambda: [])
-        monkeypatch.setattr(st, "create_issue", lambda _t: make_issue(node_id="ISS1"))
+        monkeypatch.setattr(st, "create_issue", lambda _t, *a, **k: make_issue(node_id="ISS1"))
         monkeypatch.setattr(st, "get_project_meta", lambda *_: ("P1", {"Status": {"id": "F1"}}, {"Status:Planned": "O1"}))
         monkeypatch.setattr(st, "get_project_items", lambda _pid: {})
         calls = []
@@ -730,7 +766,7 @@ class TestSyncProjectMode:
         monkeypatch.setattr(st, "TRACKER_PATH", tracker)
         monkeypatch.setattr(st, "ensure_label", lambda: None)
         monkeypatch.setattr(st, "list_issues", lambda: [])
-        monkeypatch.setattr(st, "create_issue", lambda _t: make_issue(node_id="ISS1"))
+        monkeypatch.setattr(st, "create_issue", lambda _t, *a, **k: make_issue(node_id="ISS1"))
         monkeypatch.setattr(st, "get_project_meta", lambda *_: (_ for _ in ()).throw(RuntimeError("boom")))
         monkeypatch.setattr(st, "sync_to_project", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not be called")))
 
@@ -955,7 +991,7 @@ class TestStepSummary:
         monkeypatch.setattr(st, "TRACKER_PATH", tracker)
         monkeypatch.setattr(st, "ensure_label", lambda: None)
         monkeypatch.setattr(st, "list_issues", lambda: [])
-        monkeypatch.setattr(st, "create_issue", lambda _t: make_issue(number=21, title="[tracker] Task A"))
+        monkeypatch.setattr(st, "create_issue", lambda _t, *a, **k: make_issue(number=21, title="[tracker] Task A"))
 
         st.sync()
 
@@ -972,7 +1008,7 @@ class TestStepSummary:
         monkeypatch.setattr(st, "TRACKER_PATH", tracker)
         monkeypatch.setattr(st, "ensure_label", lambda: None)
         monkeypatch.setattr(st, "list_issues", lambda: [])
-        monkeypatch.setattr(st, "create_issue", lambda _t: make_issue(number=42, title="[tracker] Task A"))
+        monkeypatch.setattr(st, "create_issue", lambda _t, *a, **k: make_issue(number=42, title="[tracker] Task A"))
 
         st.sync()
         text = summary.read_text(encoding="utf-8")

@@ -116,7 +116,11 @@ class Task:
     def project_priority(self) -> str:
         return PRIORITY_MAP.get(self.priority.strip().lower(), "Medium")
 
-    def to_issue_body(self) -> str:
+    def to_issue_body(
+        self,
+        issue_numbers_by_title: Optional[Dict[str, int]] = None,
+    ) -> str:
+        issue_numbers_by_title = issue_numbers_by_title or {}
         lines: List[str] = [
             "This issue is managed automatically by the"
             " [repo-task-tracker](https://github.com/DiogoRibeiro7/repo-task-tracker)"
@@ -136,6 +140,14 @@ class Task:
         lines.append("")
         if self.description:
             lines += ["## Description", "", self.description, ""]
+        if self.depends_on:
+            lines += ["## Dependencies", ""]
+            for dep in self.depends_on:
+                if dep in issue_numbers_by_title:
+                    lines.append(f"- [ ] #{issue_numbers_by_title[dep]} {dep}")
+                else:
+                    lines.append(f"- [ ] {dep}")
+            lines.append("")
         return "\n".join(lines).strip() + "\n"
 
 
@@ -191,6 +203,17 @@ def load_config(path: Path) -> TrackerConfig:
             milestone=milestone,
         ))
 
+    known_titles = {task.title for task in tasks}
+    for task in tasks:
+        for dep in task.depends_on:
+            if dep not in known_titles:
+                print(
+                    f"WARNING: task '{task.title}' depends on unknown task '{dep}'.",
+                    file=sys.stderr,
+                )
+
+    detect_cycles(tasks)
+
     owner = str(raw.get("project_owner", PROJECT_OWNER)).strip()
     number_raw = raw.get("project_number", PROJECT_NUMBER_STR)
     try:
@@ -237,6 +260,13 @@ def _find_cycles(tasks: List[Task]) -> List[List[str]]:
     for node in graph:
         dfs(node)
     return cycles
+
+
+def detect_cycles(tasks: List[Task]) -> None:
+    cycles = _find_cycles(tasks)
+    if cycles:
+        cycle_text = "; ".join(" -> ".join(cycle) for cycle in cycles)
+        _fail(f"Circular dependencies detected: {cycle_text}")
 
 
 def validate_config(config: TrackerConfig) -> List[str]:
@@ -394,11 +424,14 @@ def find_issue(
     return None
 
 
-def create_issue(task: Task) -> Dict[str, Any]:
+def create_issue(
+    task: Task,
+    issue_numbers_by_title: Optional[Dict[str, int]] = None,
+) -> Dict[str, Any]:
     issue_labels = [MANAGED_LABEL] + task.labels
     payload: Dict[str, Any] = {
         "title": task.issue_title,
-        "body": task.to_issue_body(),
+        "body": task.to_issue_body(issue_numbers_by_title),
         "labels": issue_labels,
     }
     if task.assignees:
@@ -415,7 +448,7 @@ def create_issue(task: Task) -> Dict[str, Any]:
             "number": 0,
             "title": task.issue_title,
             "state": "open",
-            "body": task.to_issue_body(),
+            "body": task.to_issue_body(issue_numbers_by_title),
             "id": f"DRYRUN_{task.slug}",
         }
     result = _rest("POST", f"/repos/{REPOSITORY}/issues", payload)
@@ -424,11 +457,14 @@ def create_issue(task: Task) -> Dict[str, Any]:
 
 
 def update_issue(
-    number: int, task: Task, state: Optional[str] = None
+    number: int,
+    task: Task,
+    state: Optional[str] = None,
+    issue_numbers_by_title: Optional[Dict[str, int]] = None,
 ) -> None:
     payload: Dict[str, Any] = {
         "title": task.issue_title,
-        "body": task.to_issue_body(),
+        "body": task.to_issue_body(issue_numbers_by_title),
     }
     if task.assignees:
         payload["assignees"] = task.assignees
@@ -759,6 +795,14 @@ def sync() -> None:
 
     ensure_label()
     existing_issues = list_issues()
+    issue_numbers_by_title: Dict[str, int] = {}
+    for issue in existing_issues:
+        title = str(issue.get("title", ""))
+        if title.startswith(f"{ISSUE_PREFIX} "):
+            task_title = title[len(f"{ISSUE_PREFIX} "):]
+            number = issue.get("number")
+            if isinstance(number, int):
+                issue_numbers_by_title[task_title] = number
     print(f"Syncing {len(config.tasks)} tasks → {REPOSITORY}\n")
     summary_rows: List[Dict[str, str]] = []
 
@@ -768,7 +812,10 @@ def sync() -> None:
 
         if status in OPEN_STATUSES:
             if existing is None:
-                existing = create_issue(task)
+                existing = create_issue(task, issue_numbers_by_title)
+                created_number = existing.get("number")
+                if isinstance(created_number, int) and created_number > 0:
+                    issue_numbers_by_title[task.title] = created_number
                 summary_rows.append({
                     "number": str(existing.get("number", "?")),
                     "title": str(existing.get("title", task.issue_title)),
@@ -777,14 +824,23 @@ def sync() -> None:
             else:
                 num = int(existing["number"])
                 if existing.get("state") == "closed":
-                    update_issue(num, task, state="open")
+                    update_issue(
+                        num,
+                        task,
+                        state="open",
+                        issue_numbers_by_title=issue_numbers_by_title,
+                    )
                     summary_rows.append({
                         "number": str(existing.get("number", num)),
                         "title": str(existing.get("title", task.issue_title)),
                         "action": "reopened",
                     })
                 else:
-                    update_issue(num, task)
+                    update_issue(
+                        num,
+                        task,
+                        issue_numbers_by_title=issue_numbers_by_title,
+                    )
                     summary_rows.append({
                         "number": str(existing.get("number", num)),
                         "title": str(existing.get("title", task.issue_title)),
@@ -793,7 +849,10 @@ def sync() -> None:
 
         elif status in CLOSED_STATUSES:
             if existing is None:
-                existing = create_issue(task)
+                existing = create_issue(task, issue_numbers_by_title)
+                created_number = existing.get("number")
+                if isinstance(created_number, int) and created_number > 0:
+                    issue_numbers_by_title[task.title] = created_number
                 summary_rows.append({
                     "number": str(existing.get("number", "?")),
                     "title": str(existing.get("title", task.issue_title)),
@@ -815,7 +874,12 @@ def sync() -> None:
                     "action": "closed",
                 })
             elif existing.get("state") == "open":
-                update_issue(int(existing["number"]), task, state="closed")
+                update_issue(
+                    int(existing["number"]),
+                    task,
+                    state="closed",
+                    issue_numbers_by_title=issue_numbers_by_title,
+                )
                 summary_rows.append({
                     "number": str(existing.get("number", "?")),
                     "title": str(existing.get("title", task.issue_title)),
