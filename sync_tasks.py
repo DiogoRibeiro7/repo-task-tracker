@@ -597,6 +597,60 @@ def sync_to_project(
         _set_text(project_id, item_id, fields["Next action"]["id"], task.description)
 
 
+def find_orphan_issues(
+    issues: Iterable[Dict[str, Any]],
+    tasks: Iterable[Task],
+) -> List[Dict[str, Any]]:
+    known_titles = {task.issue_title for task in tasks}
+    known_keys = {f"`{task.slug}`" for task in tasks}
+    orphans: List[Dict[str, Any]] = []
+
+    for issue in issues:
+        title = str(issue.get("title", ""))
+        body = str(issue.get("body", ""))
+        title_match = title in known_titles
+        body_match = any(key in body for key in known_keys)
+        if not title_match and not body_match:
+            orphans.append(issue)
+    return orphans
+
+
+def handle_orphans(
+    issues: Iterable[Dict[str, Any]],
+    tasks: Iterable[Task],
+    mode: str,
+) -> None:
+    normalized_mode = mode.strip().lower()
+    if normalized_mode == "ignore":
+        return
+
+    if normalized_mode not in {"warn", "close"}:
+        print(
+            f"WARNING: unknown on-orphan mode '{mode}', falling back to 'warn'.",
+            file=sys.stderr,
+        )
+        normalized_mode = "warn"
+
+    for issue in find_orphan_issues(issues, tasks):
+        number = issue.get("number")
+        title = issue.get("title", "<unknown>")
+        if normalized_mode == "warn":
+            print(
+                f"WARNING: orphan tracker issue #{number}: {title}",
+                file=sys.stderr,
+            )
+            continue
+
+        if issue.get("state") == "closed":
+            continue
+        if _is_dry_run():
+            print(f"[DRY RUN] Would close orphan issue #{number}: {title}")
+            continue
+
+        _rest("PATCH", f"/repos/{REPOSITORY}/issues/{number}", {"state": "closed"})
+        print(f"  ✕ Closed orphan #{number}: {title}")
+
+
 # ---------------------------------------------------------------------------
 # Main sync loop
 # ---------------------------------------------------------------------------
@@ -689,6 +743,12 @@ def sync() -> None:
                 existing, task,
                 project_id, project_items, fields, options,  # type: ignore[arg-type]
             )
+
+    handle_orphans(
+        existing_issues,
+        config.tasks,
+        os.environ.get("ON_ORPHAN", "warn"),
+    )
 
     print("\nDone.")
 

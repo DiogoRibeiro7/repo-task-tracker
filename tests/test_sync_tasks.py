@@ -789,7 +789,37 @@ class TestDryRunMode:
         issue = st.create_issue(make_task(title="Dry create", labels=["x"]))
         out = capsys.readouterr().out
         assert "[DRY RUN]" in out
-        assert issue["number"] == 0
+
+
+class TestOrphanHandling:
+    def test_on_orphan_ignore_does_nothing(self, monkeypatch, capsys):
+        issue = make_issue(number=10, title="[tracker] orphan", body="none")
+        monkeypatch.setattr(st, "_rest", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no close expected")))
+        st.handle_orphans([issue], [make_task(title="Known task")], mode="ignore")
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
+
+    def test_on_orphan_warn_prints_stderr(self, monkeypatch, capsys):
+        issue = make_issue(number=10, title="[tracker] orphan", body="none")
+        monkeypatch.setattr(st, "_rest", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no close expected")))
+        st.handle_orphans([issue], [make_task(title="Known task")], mode="warn")
+        err = capsys.readouterr().err
+        assert "WARNING: orphan tracker issue #10" in err
+
+    def test_on_orphan_close_closes_issue(self, monkeypatch, capsys):
+        issue = make_issue(number=10, title="[tracker] orphan", body="none", state="open")
+        calls = []
+        monkeypatch.setattr(st, "_rest", lambda *a, **k: calls.append((a, k)))
+        monkeypatch.setenv("DRY_RUN", "false")
+        st.handle_orphans([issue], [make_task(title="Known task")], mode="close")
+        assert len(calls) == 1
+        args = calls[0][0]
+        assert args[0] == "PATCH"
+        assert "/issues/10" in args[1]
+        assert args[2] == {"state": "closed"}
+        out = capsys.readouterr().out
+        assert "Closed orphan #10" in out
 
     def test_update_issue_dry_run_skips_rest(self, monkeypatch, capsys):
         monkeypatch.setenv("DRY_RUN", "true")

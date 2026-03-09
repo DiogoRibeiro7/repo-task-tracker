@@ -48,6 +48,13 @@ inputs:
     required: false
     default: 'false'
 
+  on-orphan:
+    description: >
+      How to handle tracker-labelled issues not present in tracker.json:
+      warn, close, or ignore.
+    required: false
+    default: 'warn'
+
 runs:
   using: composite
   steps:
@@ -66,4 +73,5 @@ runs:
         TRACKER_PATH: ${{ inputs.tracker-path }}
         VALIDATE_ONLY: ${{ inputs.validate }}
         DRY_RUN: ${{ inputs.dry-run }}
+        ON_ORPHAN: ${{ inputs.on-orphan }}
       run: python "${{ github.action_path }}/sync_tasks.py"
