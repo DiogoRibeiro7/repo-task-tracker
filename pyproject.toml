@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.backends.legacy:build"
+
+[project]
+name = "repo-task-tracker"
+version = "0.1.0"
+description = "GitHub Action: sync tracker.json tasks to Issues and a Project board"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Diogo Ribeiro", email = "dfr@esmad.ipp.pt" }]
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-cov>=5"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short"
+
+[tool.coverage.run]
+source = ["."]
+omit = ["tests/*", "setup.py"]

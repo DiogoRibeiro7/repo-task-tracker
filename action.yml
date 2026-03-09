@@ -1,0 +1,57 @@
+name: 'Repo Task Tracker'
+description: >
+  Syncs a tracker.json task list to GitHub Issues in the current repo,
+  then pushes those issues to a central GitHub Projects (v2) board.
+
+author: 'Diogo Ribeiro <dfr@esmad.ipp.pt>'
+
+branding:
+  icon: 'check-square'
+  color: 'blue'
+
+inputs:
+  github-token:
+    description: >
+      Token with issues:write and (if using a project board) projects:write.
+      Use a PAT stored as a secret — the default GITHUB_TOKEN cannot write
+      to Projects owned by a user account.
+    required: true
+
+  project-owner:
+    description: >
+      GitHub login or organisation that owns the Project board.
+      Leave empty to skip project board sync.
+    required: false
+    default: ''
+
+  project-number:
+    description: >
+      Integer number of the GitHub Project board (visible in the URL:
+      github.com/users/<owner>/projects/<number>).
+      Leave as 0 to skip project board sync.
+    required: false
+    default: '0'
+
+  tracker-path:
+    description: >
+      Path to tracker.json relative to the repository root.
+    required: false
+    default: 'tracker.json'
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.12'
+
+    - name: Run task sync
+      shell: bash
+      env:
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+        PROJECT_OWNER: ${{ inputs.project-owner }}
+        PROJECT_NUMBER: ${{ inputs.project-number }}
+        TRACKER_PATH: ${{ inputs.tracker-path }}
+      run: python "${{ github.action_path }}/sync_tasks.py"
