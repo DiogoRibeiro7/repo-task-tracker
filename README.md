@@ -144,6 +144,8 @@ token is sufficient.
 | `status` | string | `planned` | See status values below. |
 | `priority` | string | `medium` | `low`, `medium`, `high`, `critical` |
 | `labels` | array | `[]` | Extra labels to add to the issue alongside `tracker`. |
+| `assignees` | array | `[]` | GitHub login names to assign on issue create/update. |
+| `milestone` | integer | `null` | Milestone number to set on issue create/update. |
 
 ### Status values
 
@@ -167,6 +169,51 @@ token is sufficient.
 | `project-owner` | | `""` | Owner of the Project board. Empty = skip board sync. |
 | `project-number` | | `0` | Project board number. `0` = skip board sync. |
 | `tracker-path` | | `tracker.json` | Path to the config file relative to repo root. |
+| `tracker-glob` | | `""` | Glob pattern for multiple tracker files. Overrides `tracker-path`. |
+| `validate` | | `false` | Validate config and exit without any API writes. |
+| `dry-run` | | `false` | Show what would change without mutating issues or project fields. |
+| `on-orphan` | | `warn` | Behavior for orphan `tracker` issues: `warn`, `close`, `ignore`. |
+
+### Advanced modes
+
+#### Validate-only
+
+```yaml
+- uses: DiogoRibeiro7/repo-task-tracker@v1
+  with:
+    github-token: ${{ secrets.PROJECT_TOKEN }}
+    validate: 'true'
+```
+
+#### Dry-run preview
+
+```yaml
+- uses: DiogoRibeiro7/repo-task-tracker@v1
+  with:
+    github-token: ${{ secrets.PROJECT_TOKEN }}
+    dry-run: 'true'
+```
+
+#### Multi-file tracker sync
+
+```yaml
+- uses: DiogoRibeiro7/repo-task-tracker@v1
+  with:
+    github-token: ${{ secrets.PROJECT_TOKEN }}
+    tracker-glob: 'trackers/*.json'
+```
+
+#### Orphan policy
+
+```yaml
+- uses: DiogoRibeiro7/repo-task-tracker@v1
+  with:
+    github-token: ${{ secrets.PROJECT_TOKEN }}
+    on-orphan: 'close'
+```
+
+Environment tuning:
+- `RATELIMIT_BUFFER` (default `10`): when remaining REST quota drops to this value or lower, the action waits for reset before continuing.
 
 ---
 

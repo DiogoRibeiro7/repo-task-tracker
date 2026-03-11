@@ -36,6 +36,31 @@ inputs:
     required: false
     default: 'tracker.json'
 
+  tracker-glob:
+    description: >
+      Glob pattern for multiple tracker files. If set, overrides tracker-path.
+    required: false
+    default: ''
+
+  validate:
+    description: >
+      Validate tracker.json only and exit without creating/updating issues.
+    required: false
+    default: 'false'
+
+  dry-run:
+    description: >
+      Preview changes without mutating issues or project board items.
+    required: false
+    default: 'false'
+
+  on-orphan:
+    description: >
+      How to handle tracker-labelled issues not present in tracker.json:
+      warn, close, or ignore.
+    required: false
+    default: 'warn'
+
 runs:
   using: composite
   steps:
@@ -52,4 +77,8 @@ runs:
         PROJECT_OWNER: ${{ inputs.project-owner }}
         PROJECT_NUMBER: ${{ inputs.project-number }}
         TRACKER_PATH: ${{ inputs.tracker-path }}
+        TRACKER_GLOB: ${{ inputs.tracker-glob }}
+        VALIDATE_ONLY: ${{ inputs.validate }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        ON_ORPHAN: ${{ inputs.on-orphan }}
       run: python "${{ github.action_path }}/sync_tasks.py"

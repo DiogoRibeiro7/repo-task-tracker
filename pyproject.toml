@@ -12,7 +12,7 @@ authors = [{ name = "Diogo Ribeiro", email = "dfr@esmad.ipp.pt" }]
 requires-python = ">=3.10"
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "pytest-cov>=5"]
+dev = ["pytest>=8", "pytest-cov>=5", "mypy>=1.10"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -21,3 +21,9 @@ addopts = "--tb=short"
 [tool.coverage.run]
 source = ["."]
 omit = ["tests/*", "setup.py"]
+
+[tool.mypy]
+python_version = "3.10"
+warn_unused_ignores = true
+warn_redundant_casts = true
+show_error_codes = true
