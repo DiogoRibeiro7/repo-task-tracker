@@ -955,7 +955,7 @@ class TestDryRunMode:
     def test_create_issue_dry_run_skips_rest(self, monkeypatch, capsys):
         monkeypatch.setenv("DRY_RUN", "true")
         monkeypatch.setattr(st, "_rest", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no REST writes")))
-        issue = st.create_issue(make_task(title="Dry create", labels=["x"]))
+        st.create_issue(make_task(title="Dry create", labels=["x"]))
         out = capsys.readouterr().out
         assert "[DRY RUN]" in out
 

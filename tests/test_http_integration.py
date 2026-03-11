@@ -6,8 +6,6 @@ from io import BytesIO
 from pathlib import Path
 from urllib.error import HTTPError
 
-import pytest
-
 from conftest import sync_tasks as st
 
 
