@@ -1,7 +1,8 @@
 # repo-task-tracker
 
 [![CI](https://github.com/DiogoRibeiro7/repo-task-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/DiogoRibeiro7/repo-task-tracker/actions/workflows/ci.yml)
-[![codecov](https://codecov.io/gh/DiogoRibeiro7/repo-task-tracker/graph/badge.svg?branch=develop)](https://codecov.io/gh/DiogoRibeiro7/repo-task-tracker)
+[![codecov](https://codecov.io/gh/DiogoRibeiro7/repo-task-tracker/graph/badge.svg?branch=main)](https://codecov.io/gh/DiogoRibeiro7/repo-task-tracker)
+[![Release](https://img.shields.io/github/v/release/DiogoRibeiro7/repo-task-tracker)](https://github.com/DiogoRibeiro7/repo-task-tracker/releases)
 
 A GitHub Action that turns a `tracker.json` file in your repository into
 GitHub Issues, then syncs those issues to a central GitHub Projects (v2) board.
@@ -243,3 +244,4 @@ pytest
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
+Release process and signed tag requirements are documented in [RELEASE_POLICY.md](RELEASE_POLICY.md).

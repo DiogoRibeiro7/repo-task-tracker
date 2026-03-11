@@ -1,0 +1,59 @@
+name: Bug report
+description: Report a reproducible problem in repo-task-tracker.
+title: "[bug] "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting a bug. Please provide enough detail to reproduce it.
+  - type: input
+    id: summary
+    attributes:
+      label: Summary
+      description: One-line description of the bug.
+      placeholder: Action fails when tracker-glob matches multiple files
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Steps to reproduce
+      description: Include tracker file, workflow snippet, and exact steps.
+      placeholder: |
+        1. Configure workflow with ...
+        2. Run action with ...
+        3. Observe ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: Issues should be created and synced without failure.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: Action exits with SystemExit and no issues are created.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Paste CI logs or traceback output.
+      render: shell
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Action version
+      description: Tag/sha used in your workflow.
+      placeholder: v1
+    validations:
+      required: true
