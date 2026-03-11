@@ -107,6 +107,19 @@ class TestTaskToIssueBody:
         t = make_task()
         assert "repo-task-tracker" in t.to_issue_body()
 
+    def test_includes_assignees_and_milestone_when_set(self):
+        t = make_task(assignees=["alice", "bob"], milestone=3)
+        body = t.to_issue_body()
+        assert "`alice, bob`" in body
+        assert "`3`" in body
+
+    def test_dependencies_section_with_issue_numbers(self):
+        t = make_task(title="Task A", depends_on=["Task B", "Task C"])
+        body = t.to_issue_body({"Task B": 12})
+        assert "## Dependencies" in body
+        assert "- [ ] #12 Task B" in body
+        assert "- [ ] Task C" in body
+
 
 # ===========================================================================
 # load_config
@@ -196,6 +209,47 @@ class TestLoadConfig:
         assert config.tasks[0].status == "whatever"
         captured = capsys.readouterr()
         assert "WARNING" in captured.err
+
+    def test_assignees_and_milestone_loaded(self, tmp_path):
+        p = self._write(tmp_path, {
+            "tasks": [{
+                "title": "X",
+                "assignees": ["alice", "bob"],
+                "milestone": 4,
+            }]
+        })
+        config = st.load_config(p)
+        assert config.tasks[0].assignees == ["alice", "bob"]
+        assert config.tasks[0].milestone == 4
+
+    def test_unknown_dependency_warns(self, tmp_path, capsys):
+        p = self._write(tmp_path, {
+            "tasks": [{"title": "A", "depends_on": ["Missing"]}]
+        })
+        st.load_config(p)
+        err = capsys.readouterr().err
+        assert "depends on unknown task 'Missing'" in err
+
+    def test_cycle_detection_direct(self, tmp_path):
+        p = self._write(tmp_path, {
+            "tasks": [
+                {"title": "A", "depends_on": ["B"]},
+                {"title": "B", "depends_on": ["A"]},
+            ]
+        })
+        with pytest.raises(SystemExit):
+            st.load_config(p)
+
+    def test_cycle_detection_transitive(self, tmp_path):
+        p = self._write(tmp_path, {
+            "tasks": [
+                {"title": "A", "depends_on": ["B"]},
+                {"title": "B", "depends_on": ["C"]},
+                {"title": "C", "depends_on": ["A"]},
+            ]
+        })
+        with pytest.raises(SystemExit):
+            st.load_config(p)
 
 
 # ===========================================================================
@@ -288,10 +342,10 @@ class TestSync:
         monkeypatch.setattr(st, "list_issues",
                             lambda: existing_issues or [])
         monkeypatch.setattr(st, "create_issue",
-                            lambda t: actions.append(("create", t.title))
+                            lambda t, *args, **kwargs: actions.append(("create", t.title))
                             or make_issue(title=t.issue_title))
         monkeypatch.setattr(st, "update_issue",
-                            lambda n, t, state=None:
+                            lambda n, t, state=None, **kwargs:
                             actions.append(("update", n, t.title, state)))
         monkeypatch.setattr(st, "_rest", lambda *a, **kw: None)
 
@@ -428,6 +482,7 @@ class TestRestHelpers:
         class Resp:
             def __init__(self, payload):
                 self.payload = payload
+                self.headers = {}
 
             def __enter__(self):
                 return self
@@ -500,12 +555,106 @@ class TestRestHelpers:
         assert calls[0][0] == "POST"
         assert calls[0][2]["labels"] == ["tracker", "bug"]
 
+    def test_create_issue_includes_assignees_and_milestone(self, monkeypatch):
+        calls = []
+
+        def fake_rest(method, path, payload=None, expected_errors=None):
+            calls.append((method, path, payload, expected_errors))
+            return {"number": 33}
+
+        monkeypatch.setattr(st, "_rest", fake_rest)
+        task = make_task(title="Feature", assignees=["alice"], milestone=2)
+        st.create_issue(task)
+        payload = calls[0][2]
+        assert payload["assignees"] == ["alice"]
+        assert payload["milestone"] == 2
+
+    def test_create_issue_missing_assignees_and_milestone_is_safe(self, monkeypatch):
+        calls = []
+
+        def fake_rest(method, path, payload=None, expected_errors=None):
+            calls.append((method, path, payload, expected_errors))
+            return {"number": 34}
+
+        monkeypatch.setattr(st, "_rest", fake_rest)
+        st.create_issue(make_task(title="No extras"))
+        payload = calls[0][2]
+        assert "assignees" not in payload
+        assert "milestone" not in payload
+
     def test_update_issue_sets_state_when_provided(self, monkeypatch):
         calls = []
         monkeypatch.setattr(st, "_rest", lambda *a, **k: calls.append((a, k)))
         st.update_issue(3, make_task(title="X"), state="closed")
         payload = calls[0][0][2]
         assert payload["state"] == "closed"
+
+    def test_update_issue_includes_assignees_and_milestone(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(st, "_rest", lambda *a, **k: calls.append((a, k)))
+        st.update_issue(7, make_task(title="X", assignees=["alice"], milestone=8))
+        payload = calls[0][0][2]
+        assert payload["assignees"] == ["alice"]
+        assert payload["milestone"] == 8
+
+    def test_check_rate_limit_sleeps_at_threshold(self, monkeypatch):
+        sleeps = []
+        monkeypatch.setenv("RATELIMIT_BUFFER", "10")
+        monkeypatch.setattr(st.time, "time", lambda: 100.0)
+        monkeypatch.setattr(st.time, "sleep", lambda seconds: sleeps.append(seconds))
+        st._check_rate_limit({
+            "x-ratelimit-remaining": "10",
+            "x-ratelimit-reset": "105",
+        })
+        assert sleeps == [6.0]
+
+    def test_check_rate_limit_no_sleep_above_threshold(self, monkeypatch):
+        sleeps = []
+        monkeypatch.setenv("RATELIMIT_BUFFER", "10")
+        monkeypatch.setattr(st.time, "time", lambda: 100.0)
+        monkeypatch.setattr(st.time, "sleep", lambda seconds: sleeps.append(seconds))
+        st._check_rate_limit({
+            "x-ratelimit-remaining": "11",
+            "x-ratelimit-reset": "105",
+        })
+        assert sleeps == []
+
+    def test_rest_retries_once_on_403_retry_after(self, monkeypatch):
+        monkeypatch.setattr(st, "TOKEN", "token")
+        monkeypatch.setattr(st, "REPOSITORY", "owner/repo")
+        sleeps = []
+        monkeypatch.setattr(st.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+        class Resp:
+            headers = {}
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *_):
+                return None
+
+            def read(self):
+                return b'{"ok": true}'
+
+        calls = {"n": 0}
+
+        def fake_urlopen(_req):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                raise HTTPError(
+                    url="https://api.github.com/x",
+                    code=403,
+                    msg="secondary rate limit",
+                    hdrs={"retry-after": "2"},
+                    fp=BytesIO(b'{"message":"rate limited"}'),
+                )
+            return Resp()
+
+        monkeypatch.setattr(st, "urlopen", fake_urlopen)
+        result = st._rest("GET", "/x")
+        assert result == {"ok": True}
+        assert sleeps == [2.0]
 
 
 class TestGraphQLHelpers:
@@ -655,7 +804,7 @@ class TestSyncProjectMode:
         monkeypatch.setattr(st, "TRACKER_PATH", tracker)
         monkeypatch.setattr(st, "ensure_label", lambda: None)
         monkeypatch.setattr(st, "list_issues", lambda: [])
-        monkeypatch.setattr(st, "create_issue", lambda _t: make_issue(node_id="ISS1"))
+        monkeypatch.setattr(st, "create_issue", lambda _t, *a, **k: make_issue(node_id="ISS1"))
         monkeypatch.setattr(st, "get_project_meta", lambda *_: ("P1", {"Status": {"id": "F1"}}, {"Status:Planned": "O1"}))
         monkeypatch.setattr(st, "get_project_items", lambda _pid: {})
         calls = []
@@ -677,8 +826,338 @@ class TestSyncProjectMode:
         monkeypatch.setattr(st, "TRACKER_PATH", tracker)
         monkeypatch.setattr(st, "ensure_label", lambda: None)
         monkeypatch.setattr(st, "list_issues", lambda: [])
-        monkeypatch.setattr(st, "create_issue", lambda _t: make_issue(node_id="ISS1"))
+        monkeypatch.setattr(st, "create_issue", lambda _t, *a, **k: make_issue(node_id="ISS1"))
         monkeypatch.setattr(st, "get_project_meta", lambda *_: (_ for _ in ()).throw(RuntimeError("boom")))
         monkeypatch.setattr(st, "sync_to_project", lambda *a, **k: (_ for _ in ()).throw(AssertionError("should not be called")))
 
         st.sync()
+
+
+class TestValidateConfig:
+    def test_duplicate_titles(self):
+        cfg = TrackerConfig(
+            tasks=[
+                make_task(title="A"),
+                make_task(title="A"),
+            ],
+            project_owner="",
+            project_number=0,
+        )
+        errors = st.validate_config(cfg)
+        assert any("Duplicate task title" in e for e in errors)
+
+    def test_invalid_status(self):
+        cfg = TrackerConfig(
+            tasks=[make_task(title="A", status="unknown_status")],
+            project_owner="",
+            project_number=0,
+        )
+        errors = st.validate_config(cfg)
+        assert any("invalid status" in e for e in errors)
+
+    def test_invalid_priority(self):
+        cfg = TrackerConfig(
+            tasks=[make_task(title="A", priority="urgent")],
+            project_owner="",
+            project_number=0,
+        )
+        errors = st.validate_config(cfg)
+        assert any("invalid priority" in e for e in errors)
+
+    def test_unknown_depends_on(self):
+        cfg = TrackerConfig(
+            tasks=[make_task(title="A", depends_on=["Missing"])],
+            project_owner="",
+            project_number=0,
+        )
+        errors = st.validate_config(cfg)
+        assert any("depends on unknown task" in e for e in errors)
+
+    def test_dependency_cycle(self):
+        cfg = TrackerConfig(
+            tasks=[
+                make_task(title="A", depends_on=["B"]),
+                make_task(title="B", depends_on=["A"]),
+            ],
+            project_owner="",
+            project_number=0,
+        )
+        errors = st.validate_config(cfg)
+        assert any("Dependency cycle detected" in e for e in errors)
+
+    def test_non_string_labels(self):
+        bad_labels: Any = ["ok", 123]
+        cfg = TrackerConfig(
+            tasks=[make_task(title="A", labels=bad_labels)],
+            project_owner="",
+            project_number=0,
+        )
+        errors = st.validate_config(cfg)
+        assert any("non-string label" in e for e in errors)
+
+    def test_non_string_assignees(self):
+        bad_assignees: Any = ["alice", 123]
+        cfg = TrackerConfig(
+            tasks=[make_task(title="A", assignees=bad_assignees)],
+            project_owner="",
+            project_number=0,
+        )
+        errors = st.validate_config(cfg)
+        assert any("non-string assignee" in e for e in errors)
+
+    def test_validation_errors_include_source(self):
+        cfg = TrackerConfig(
+            tasks=[make_task(title="A", status="bad_status")],
+            project_owner="",
+            project_number=0,
+        )
+        errors = st.validate_config(cfg, source="configs/a.json")
+        assert any(e.startswith("[configs/a.json]") for e in errors)
+
+
+class TestValidateOnlyMode:
+    def test_validate_only_success_exits_without_api_calls(self, monkeypatch, tmp_path, capsys):
+        tracker = tmp_path / "tracker.json"
+        tracker.write_text(json.dumps({
+            "tasks": [{"title": "Valid task", "status": "planned", "priority": "medium"}]
+        }), encoding="utf-8")
+
+        monkeypatch.setenv("VALIDATE_ONLY", "true")
+        monkeypatch.setattr(st, "TRACKER_PATH", tracker)
+        monkeypatch.setattr(st, "ensure_label", lambda: (_ for _ in ()).throw(AssertionError("no API calls")))
+        monkeypatch.setattr(st, "list_issues", lambda: (_ for _ in ()).throw(AssertionError("no API calls")))
+
+        st.sync()
+        out = capsys.readouterr().out
+        assert "Validation passed." in out
+
+    def test_validate_only_failure_prints_numbered_errors(self, monkeypatch, tmp_path, capsys):
+        tracker = tmp_path / "tracker.json"
+        tracker.write_text(json.dumps({
+            "tasks": [
+                {"title": "Dup", "status": "planned", "priority": "medium"},
+                {"title": "Dup", "status": "bad", "priority": "urgent", "labels": [1]},
+            ]
+        }), encoding="utf-8")
+
+        monkeypatch.setenv("VALIDATE_ONLY", "true")
+        monkeypatch.setattr(st, "TRACKER_PATH", tracker)
+        monkeypatch.setattr(st, "ensure_label", lambda: (_ for _ in ()).throw(AssertionError("no API calls")))
+
+        with pytest.raises(SystemExit):
+            st.sync()
+        err = capsys.readouterr().err
+        assert "Validation failed:" in err
+        assert "1." in err
+
+
+class TestDryRunMode:
+    def test_create_issue_dry_run_skips_rest(self, monkeypatch, capsys):
+        monkeypatch.setenv("DRY_RUN", "true")
+        monkeypatch.setattr(st, "_rest", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no REST writes")))
+        st.create_issue(make_task(title="Dry create", labels=["x"]))
+        out = capsys.readouterr().out
+        assert "[DRY RUN]" in out
+
+
+class TestOrphanHandling:
+    def test_on_orphan_ignore_does_nothing(self, monkeypatch, capsys):
+        issue = make_issue(number=10, title="[tracker] orphan", body="none")
+        monkeypatch.setattr(st, "_rest", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no close expected")))
+        st.handle_orphans([issue], [make_task(title="Known task")], mode="ignore")
+        captured = capsys.readouterr()
+        assert captured.out == ""
+        assert captured.err == ""
+
+    def test_on_orphan_warn_prints_stderr(self, monkeypatch, capsys):
+        issue = make_issue(number=10, title="[tracker] orphan", body="none")
+        monkeypatch.setattr(st, "_rest", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no close expected")))
+        st.handle_orphans([issue], [make_task(title="Known task")], mode="warn")
+        err = capsys.readouterr().err
+        assert "WARNING: orphan tracker issue #10" in err
+
+    def test_on_orphan_close_closes_issue(self, monkeypatch, capsys):
+        issue = make_issue(number=10, title="[tracker] orphan", body="none", state="open")
+        calls = []
+        monkeypatch.setattr(st, "_rest", lambda *a, **k: calls.append((a, k)))
+        monkeypatch.setenv("DRY_RUN", "false")
+        st.handle_orphans([issue], [make_task(title="Known task")], mode="close")
+        assert len(calls) == 1
+        args = calls[0][0]
+        assert args[0] == "PATCH"
+        assert "/issues/10" in args[1]
+        assert args[2] == {"state": "closed"}
+        out = capsys.readouterr().out
+        assert "Closed orphan #10" in out
+
+    def test_update_issue_dry_run_skips_rest(self, monkeypatch, capsys):
+        monkeypatch.setenv("DRY_RUN", "true")
+        monkeypatch.setattr(st, "_rest", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no REST writes")))
+        st.update_issue(123, make_task(title="Dry update"), state="closed")
+        out = capsys.readouterr().out
+        assert "[DRY RUN]" in out
+
+    def test_sync_closed_task_dry_run_no_mutating_calls(self, monkeypatch, tmp_path, capsys):
+        tracker = tmp_path / "tracker.json"
+        tracker.write_text(json.dumps({
+            "tasks": [{"title": "Done task", "status": "done"}]
+        }), encoding="utf-8")
+
+        monkeypatch.setenv("GITHUB_TOKEN", "token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setenv("DRY_RUN", "true")
+        monkeypatch.setattr(st, "TRACKER_PATH", tracker)
+        monkeypatch.setattr(st, "ensure_label", lambda: None)
+        monkeypatch.setattr(st, "list_issues", lambda: [])
+        monkeypatch.setattr(st, "_rest", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no REST writes")))
+
+        st.sync()
+        out = capsys.readouterr().out
+        assert "[DRY RUN]" in out
+
+    def test_sync_to_project_dry_run_skips_project_writes(self, monkeypatch, capsys):
+        monkeypatch.setenv("DRY_RUN", "true")
+        monkeypatch.setattr(st, "add_to_project", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no project writes")))
+        monkeypatch.setattr(st, "_set_single_select", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no project writes")))
+        monkeypatch.setattr(st, "_set_text", lambda *a, **k: (_ for _ in ()).throw(AssertionError("no project writes")))
+        monkeypatch.setattr(st, "REPOSITORY", "owner/repo")
+
+        st.sync_to_project(
+            make_issue(node_id="ISS1"),
+            make_task(title="Dry project", status="planned", priority="high"),
+            "P1",
+            {},
+            {
+                "Status": {"id": "F1"},
+                "Priority": {"id": "F2"},
+                "Repo URL": {"id": "F3"},
+                "Next action": {"id": "F4"},
+            },
+            {
+                "Status:Planned": "S1",
+                "Priority:High": "P1",
+            },
+        )
+        out = capsys.readouterr().out
+        assert "[DRY RUN]" in out
+
+
+class TestStepSummary:
+    def test_write_step_summary_format(self, tmp_path):
+        summary = tmp_path / "step_summary.md"
+        st.write_step_summary(summary, [
+            {"number": "1", "title": "[tracker] Task A", "action": "created"},
+            {"number": "1", "title": "[tracker] Task A", "action": "closed"},
+            {"number": "2", "title": "[tracker] Task B", "action": "updated"},
+        ])
+        text = summary.read_text(encoding="utf-8")
+        assert "| Action | Count |" in text
+        assert "| created | 1 |" in text
+        assert "| updated | 1 |" in text
+        assert "| reopened | 0 |" in text
+        assert "| closed | 1 |" in text
+        assert "| Issue | Title | Result |" in text
+        assert "| #1 | [tracker] Task A | created |" in text
+
+    def test_sync_without_step_summary_env_no_crash(self, monkeypatch, tmp_path):
+        tracker = tmp_path / "tracker.json"
+        tracker.write_text(json.dumps({
+            "tasks": [{"title": "Task A", "status": "planned"}]
+        }), encoding="utf-8")
+
+        monkeypatch.delenv("GITHUB_STEP_SUMMARY", raising=False)
+        monkeypatch.setenv("GITHUB_TOKEN", "token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setattr(st, "TRACKER_PATH", tracker)
+        monkeypatch.setattr(st, "ensure_label", lambda: None)
+        monkeypatch.setattr(st, "list_issues", lambda: [])
+        monkeypatch.setattr(st, "create_issue", lambda _t, *a, **k: make_issue(number=21, title="[tracker] Task A"))
+
+        st.sync()
+
+    def test_sync_writes_step_summary_when_env_set(self, monkeypatch, tmp_path):
+        tracker = tmp_path / "tracker.json"
+        tracker.write_text(json.dumps({
+            "tasks": [{"title": "Task A", "status": "planned"}]
+        }), encoding="utf-8")
+        summary = tmp_path / "summary.md"
+
+        monkeypatch.setenv("GITHUB_STEP_SUMMARY", str(summary))
+        monkeypatch.setenv("GITHUB_TOKEN", "token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setattr(st, "TRACKER_PATH", tracker)
+        monkeypatch.setattr(st, "ensure_label", lambda: None)
+        monkeypatch.setattr(st, "list_issues", lambda: [])
+        monkeypatch.setattr(st, "create_issue", lambda _t, *a, **k: make_issue(number=42, title="[tracker] Task A"))
+
+        st.sync()
+        text = summary.read_text(encoding="utf-8")
+        assert "| Action | Count |" in text
+        assert "| created | 1 |" in text
+        assert "| #42 | [tracker] Task A | created |" in text
+
+
+class TestMultiFileSync:
+    def test_tracker_glob_processes_multiple_files(self, monkeypatch, tmp_path):
+        (tmp_path / "a.json").write_text(
+            json.dumps({"tasks": [{"title": "Task A", "status": "planned"}]}),
+            encoding="utf-8",
+        )
+        (tmp_path / "b.json").write_text(
+            json.dumps({"tasks": [{"title": "Task B", "status": "planned"}]}),
+            encoding="utf-8",
+        )
+
+        created = []
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("TRACKER_GLOB", "*.json")
+        monkeypatch.setenv("GITHUB_TOKEN", "token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setenv("ON_ORPHAN", "ignore")
+        monkeypatch.setattr(st, "ensure_label", lambda: None)
+        monkeypatch.setattr(st, "list_issues", lambda: [])
+        monkeypatch.setattr(st, "create_issue", lambda t, *a, **k: created.append(t.title) or make_issue(title=t.issue_title))
+
+        st.sync()
+        assert set(created) == {"Task A", "Task B"}
+
+    def test_tracker_glob_continues_when_one_file_is_bad(self, monkeypatch, tmp_path):
+        (tmp_path / "good.json").write_text(
+            json.dumps({"tasks": [{"title": "Good task", "status": "planned"}]}),
+            encoding="utf-8",
+        )
+        (tmp_path / "bad.json").write_text("{ invalid json", encoding="utf-8")
+
+        created = []
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("TRACKER_GLOB", "*.json")
+        monkeypatch.setenv("GITHUB_TOKEN", "token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setenv("ON_ORPHAN", "ignore")
+        monkeypatch.setattr(st, "ensure_label", lambda: None)
+        monkeypatch.setattr(st, "list_issues", lambda: [])
+        monkeypatch.setattr(st, "create_issue", lambda t, *a, **k: created.append(t.title) or make_issue(title=t.issue_title))
+
+        with pytest.raises(SystemExit):
+            st.sync()
+        assert "Good task" in created
+
+    def test_single_file_mode_still_works(self, monkeypatch, tmp_path):
+        tracker = tmp_path / "single.json"
+        tracker.write_text(
+            json.dumps({"tasks": [{"title": "Single task", "status": "planned"}]}),
+            encoding="utf-8",
+        )
+
+        created = []
+        monkeypatch.delenv("TRACKER_GLOB", raising=False)
+        monkeypatch.setenv("GITHUB_TOKEN", "token")
+        monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+        monkeypatch.setenv("ON_ORPHAN", "ignore")
+        monkeypatch.setattr(st, "TRACKER_PATH", tracker)
+        monkeypatch.setattr(st, "ensure_label", lambda: None)
+        monkeypatch.setattr(st, "list_issues", lambda: [])
+        monkeypatch.setattr(st, "create_issue", lambda t, *a, **k: created.append(t.title) or make_issue(title=t.issue_title))
+
+        st.sync()
+        assert created == ["Single task"]

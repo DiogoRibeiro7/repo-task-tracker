@@ -1,0 +1,7 @@
+{
+  "number": 42,
+  "title": "[tracker] Task A",
+  "state": "open",
+  "body": "managed body",
+  "id": "ISSUE_NODE_42"
+}

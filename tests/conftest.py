@@ -19,7 +19,7 @@ spec = importlib.util.spec_from_file_location("sync_tasks", MODULE_PATH)
 assert spec and spec.loader
 sync_tasks = importlib.util.module_from_spec(spec)
 sys.modules["sync_tasks"] = sync_tasks
-spec.loader.exec_module(sync_tasks)  # type: ignore[union-attr]
+spec.loader.exec_module(sync_tasks)
 
 
 # ---------------------------------------------------------------------------
@@ -42,6 +42,9 @@ def make_task(
     status: str = "planned",
     priority: str = "medium",
     labels: Optional[List[str]] = None,
+    depends_on: Optional[List[str]] = None,
+    assignees: Optional[List[str]] = None,
+    milestone: Optional[int] = None,
 ) -> Any:
     return sync_tasks.Task(
         title=title,
@@ -49,6 +52,9 @@ def make_task(
         status=status,
         priority=priority,
         labels=labels or [],
+        depends_on=depends_on or [],
+        assignees=assignees or [],
+        milestone=milestone,
     )
 
 

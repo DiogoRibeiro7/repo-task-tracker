@@ -43,6 +43,8 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install ruff
-        run: pip install ruff
+        run: pip install ruff mypy
       - name: Ruff check
         run: ruff check sync_tasks.py tests/
+      - name: Mypy
+        run: mypy sync_tasks.py tests/

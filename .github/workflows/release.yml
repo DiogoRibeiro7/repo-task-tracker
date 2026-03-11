@@ -1,42 +1,49 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing signed tag to release (example: v1.0.4)'
+        required: true
+        type: string
 
 permissions:
   contents: write
 
 jobs:
-  release:
+  publish-release:
+    name: Publish Release From Signed Tag
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
-
-      - uses: actions/setup-python@v6
         with:
-          python-version: '3.12'
+          fetch-depth: 0
 
-      - name: Run tests before releasing
+      - name: Verify signed tag exists
+        env:
+          TAG: ${{ inputs.tag }}
         run: |
-          pip install -e ".[dev]"
-          pytest
+          set -euo pipefail
+          git fetch --tags
+          git rev-parse "$TAG" >/dev/null
+          TYPE="$(git cat-file -t "refs/tags/$TAG" || true)"
+          if [ "$TYPE" != "tag" ]; then
+            echo "Tag $TAG must be an annotated tag."
+            exit 1
+          fi
+          TAG_BODY="$(git cat-file -p "refs/tags/$TAG")"
+          if ! echo "$TAG_BODY" | grep -Eq "BEGIN (PGP|SSH) SIGNATURE"; then
+            echo "Tag $TAG is not signed. See RELEASE_POLICY.md."
+            exit 1
+          fi
 
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          generate_release_notes: true
-          files: |
-            action.yml
-            sync_tasks.py
-
-      # Move the floating major tag (e.g. v1) to point at this commit
-      - name: Update floating major tag
+      - name: Create GitHub release
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
         run: |
-          TAG=${GITHUB_REF_NAME}           # e.g. v1.2.3
-          MAJOR=$(echo "$TAG" | cut -d. -f1)  # e.g. v1
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag -fa "$MAJOR" -m "Update $MAJOR to $TAG"
-          git push origin "$MAJOR" --force
+          set -euo pipefail
+          gh release create "$TAG" \
+            --title "Repo Task Tracker $TAG" \
+            --generate-notes
