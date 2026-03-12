@@ -128,6 +128,22 @@ token is sufficient.
 
 ---
 
+## Marketplace publish checklist
+
+Before publishing or updating this action in GitHub Marketplace:
+
+- Ensure release content is merged into `main`.
+- Confirm `action.yml` metadata is final (`name`, `description`, `branding`, `inputs`).
+- Ensure a signed, annotated `v*` tag exists for the release commit.
+- Keep `v1` pointing to the latest stable `v1.x.y` tag.
+- Publish the GitHub Release from the existing signed tag.
+- Verify README examples reference `DiogoRibeiro7/repo-task-tracker@v1`.
+- Verify token guidance:
+  - board sync: PAT with Issues (read/write) + Projects (read/write)
+  - issues-only sync: default `GITHUB_TOKEN` is enough
+
+---
+
 ## `tracker.json` reference
 
 | Field | Type | Required | Description |
@@ -166,13 +182,13 @@ token is sufficient.
 
 | Input | Required | Default | Description |
 |---|---|---|---|
-| `github-token` | ✓ | — | Token for issues:write and projects:write |
+| `github-token` | ✓ | — | Token with `issues:write` and, if using a project board, `projects:write`. |
 | `project-owner` | | `""` | Owner of the Project board. Empty = skip board sync. |
 | `project-number` | | `0` | Project board number. `0` = skip board sync. |
 | `tracker-path` | | `tracker.json` | Path to the config file relative to repo root. |
 | `tracker-glob` | | `""` | Glob pattern for multiple tracker files. Overrides `tracker-path`. |
-| `validate` | | `false` | Validate config and exit without any API writes. |
-| `dry-run` | | `false` | Show what would change without mutating issues or project fields. |
+| `validate` | | `false` | Validate `tracker.json` only and exit without creating or updating issues. |
+| `dry-run` | | `false` | Preview changes without mutating issues or project board items. |
 | `on-orphan` | | `warn` | Behavior for orphan `tracker` issues: `warn`, `close`, `ignore`. |
 
 ### Advanced modes
