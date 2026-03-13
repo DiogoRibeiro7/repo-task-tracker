@@ -623,7 +623,25 @@ def add_to_project(project_id: str, issue_id: str) -> str:
     }
     """
     data = _graphql(mutation, {"pid": project_id, "cid": issue_id})
-    return data["addProjectV2ItemById"]["item"]["id"]
+    item = (data.get("addProjectV2ItemById") or {}).get("item")
+    if not item or not item.get("id"):
+        raise RuntimeError(
+            "Project API returned no item id when adding issue to project. "
+            "Check token scopes and project access."
+        )
+    return item["id"]
+
+
+def _issue_node_id(issue: Dict[str, Any]) -> Optional[str]:
+    """Return GraphQL node id for a REST issue payload if available."""
+    node_id = issue.get("node_id")
+    if isinstance(node_id, str) and node_id.strip():
+        return node_id
+    # Some payloads might already pass an ID-like value in 'id'.
+    raw_id = issue.get("id")
+    if isinstance(raw_id, str) and raw_id.strip():
+        return raw_id
+    return None
 
 
 def _set_single_select(
@@ -668,7 +686,13 @@ def sync_to_project(
     fields: Dict[str, Any],
     options: Dict[str, str],
 ) -> None:
-    issue_id = issue["id"]
+    issue_id = _issue_node_id(issue)
+    if issue_id is None:
+        print(
+            f"    ⚠ Skipping project sync for '{task.title}': issue payload "
+            "does not include a GraphQL node id."
+        )
+        return
     status_opt = options.get(f"Status:{task.project_status}")
     priority_opt = options.get(f"Priority:{task.project_priority}")
 
