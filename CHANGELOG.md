@@ -6,13 +6,19 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+### Changed
+- Codecov patch coverage gate now uses repository config (`target: 90%`, `threshold: 1%`).
+
+## [1.0.4] - 2026-03-11
+
 ### Added
-- Validation-only mode, dry-run mode, orphan handling, step summary reporting.
+- Validation-only mode, dry-run mode, and orphan handling controls.
 - Support for `assignees`, `milestone`, `depends_on`, and multi-file tracker glob processing.
-- Rate-limit buffering and secondary-rate-limit retry handling.
+- GitHub step summary reporting and REST integration test coverage.
 
 ### Changed
-- CI now includes mypy type-checking.
+- Added rate-limit buffering and secondary-rate-limit retry handling.
+- CI now includes mypy type-checking plus release guardrails for signed tags and manual release publishing.
 
 ## [1.0.3] - 2026-03-09
 
