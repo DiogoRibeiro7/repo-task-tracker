@@ -1,32 +1,28 @@
 name: Release
 
 on:
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: 'Existing signed tag to release (example: v1.0.4)'
-        required: true
-        type: string
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: write
 
 jobs:
   publish-release:
-    name: Publish Release From Signed Tag
+    name: Verify Signed Tag And Publish Release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - name: Verify signed tag exists
+      - name: Verify signed annotated tag
         env:
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
-          git fetch --tags
-          git rev-parse "$TAG" >/dev/null
+          git fetch origin main --tags
           TYPE="$(git cat-file -t "refs/tags/$TAG" || true)"
           if [ "$TYPE" != "tag" ]; then
             echo "Tag $TAG must be an annotated tag."
@@ -37,13 +33,22 @@ jobs:
             echo "Tag $TAG is not signed. See RELEASE_POLICY.md."
             exit 1
           fi
+          TAG_COMMIT="$(git rev-list -n 1 "$TAG")"
+          if ! git merge-base --is-ancestor "$TAG_COMMIT" origin/main; then
+            echo "Tag $TAG must point to a commit contained in origin/main."
+            exit 1
+          fi
 
       - name: Create GitHub release
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Skipping GitHub Release for moving tag $TAG."
+            exit 0
+          fi
           gh release create "$TAG" \
             --title "Repo Task Tracker $TAG" \
             --generate-notes

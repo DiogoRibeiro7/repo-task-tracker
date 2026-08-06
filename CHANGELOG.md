@@ -6,8 +6,17 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.1.0](https://github.com/DiogoRibeiro7/repo-task-tracker/compare/v1.0.5...v1.1.0) - 2026-08-06
+
+### Added
+- Zenodo metadata for GitHub release archiving.
+- Citation metadata with the all-versions Zenodo DOI.
+- README DOI badge and citation guidance.
+
 ### Changed
-- Codecov patch coverage gate now uses repository config (`target: 90%`, `threshold: 1%`).
+- Package, Zenodo, and citation metadata now target version `1.1.0`.
+- Release automation now publishes directly from pushed signed `v*` tags.
+- Release documentation now includes the Zenodo archive step.
 
 ## [1.0.4] - 2026-03-11
 
