@@ -7,7 +7,7 @@ authors:
     given-names: "Diogo"
     orcid: "https://orcid.org/0009-0001-2022-7072"
     affiliation: "ESMAD - Instituto Politécnico do Porto"
-version: "1.1.1"
+version: "1.2.0"
 doi: "10.5281/zenodo.19006104"
 date-released: "2026-08-06"
 license: "MIT"
