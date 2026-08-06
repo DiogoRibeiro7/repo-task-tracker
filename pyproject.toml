@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "repo-task-tracker"
-version = "1.1.0"
+version = "1.1.1"
 description = "GitHub Action: sync tracker.json tasks to Issues and a Project board"
 readme = "README.md"
 license = { file = "LICENSE" }

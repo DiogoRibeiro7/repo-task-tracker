@@ -17,6 +17,8 @@ This project publishes release tags as `v*` (for example `v1.1.0`).
 - The workflow rejects tags whose target commit is not contained in `main`.
 - Full version tags such as `v1.1.0` create GitHub Releases. Moving major tags
   such as `v1` are verified but do not create releases.
+- If GitHub does not start the tag-triggered workflow, run the same `Release`
+  workflow manually and provide the existing signed tag.
 
 ## Recommended process
 

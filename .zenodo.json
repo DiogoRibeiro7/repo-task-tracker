@@ -1,6 +1,6 @@
 {
   "title": "repo-task-tracker",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "upload_type": "software",
   "description": "GitHub Action that turns tracker.json files into GitHub Issues and syncs them to GitHub Projects v2 boards.",
   "creators": [

@@ -6,6 +6,13 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.1.1](https://github.com/DiogoRibeiro7/repo-task-tracker/compare/v1.1.0...v1.1.1) - 2026-08-06
+
+### Changed
+- Release workflow now supports a manual fallback for publishing an existing
+  signed tag if the tag-triggered workflow does not start.
+- Release creation is idempotent when the GitHub Release already exists.
+
 ## [1.1.0](https://github.com/DiogoRibeiro7/repo-task-tracker/compare/v1.0.5...v1.1.0) - 2026-08-06
 
 ### Added

@@ -4,6 +4,12 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing signed tag to release, for example v1.1.1"
+        required: true
+        type: string
 
 permissions:
   contents: write
@@ -19,7 +25,7 @@ jobs:
 
       - name: Verify signed annotated tag
         env:
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           git fetch origin main --tags
@@ -42,11 +48,15 @@ jobs:
       - name: Create GitHub release
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          TAG: ${{ github.ref_name }}
+          TAG: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
           set -euo pipefail
           if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
             echo "Skipping GitHub Release for moving tag $TAG."
+            exit 0
+          fi
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "GitHub Release for $TAG already exists."
             exit 0
           fi
           gh release create "$TAG" \
