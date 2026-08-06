@@ -6,6 +6,11 @@ The format is based on Keep a Changelog, and this project follows Semantic Versi
 
 ## [Unreleased]
 
+## [1.2.1](https://github.com/DiogoRibeiro7/repo-task-tracker/compare/v1.2.0...v1.2.1) - 2026-08-06
+
+### Changed
+- Correct release metadata after the `1.2.0` metadata-only release.
+
 ## [1.2.0](https://github.com/DiogoRibeiro7/repo-task-tracker/compare/v1.1.1...v1.2.0) - 2026-08-06
 
 ### Changed
